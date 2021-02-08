@@ -11,6 +11,7 @@ if (MSVC)
 
 else ()
   set(CMAKE_CXX_STANDARD 11)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
   set(CMAKE_CXX_EXTENSIONS OFF)
 
   if (NOT MINGW)
@@ -31,10 +32,8 @@ else ()
   endif ()
 
   if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message(STATUS "This is a debug build; enabling -Weverything...")
-
     list(APPEND DEFAULT_CXX_FLAGS
-      -Weverything -Wno-c++98-compat -Wno-missing-prototypes
+      -Wno-c++98-compat -Wno-missing-prototypes
       -Wno-missing-variable-declarations -Wno-global-constructors
       -Wno-exit-time-destructors -Wno-padded -Wno-error
     )

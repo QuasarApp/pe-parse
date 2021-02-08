@@ -26,31 +26,14 @@
  */
 
 #include <Python.h>
-#include <parser-library/parse.h>
+#include <pe-parse/parse.h>
 #include <structmember.h>
 
 using namespace peparse;
 
-#define PEPY_VERSION "0.3"
-
-/*
- * Add some definition for compatibility between python2 and python3
+/* NOTE(ww): These don't necessarily have to be the same, but currently are.
  */
-#if PY_MAJOR_VERSION >= 3
-#define PyString_FromString PyUnicode_FromString
-#endif
-
-/*
- * Some macro only available after python 2.6
- * Needed for compatibility with python3
- */
-#ifndef PyVarObject_HEAD_INIT
-#define PyVarObject_HEAD_INIT(type, size) PyObject_HEAD_INIT(type) size,
-#endif
-
-#ifndef Py_TYPE
-#define Py_TYPE(_ob_) (((PyObject *) (_ob_))->ob_type)
-#endif
+#define PEPY_VERSION PEPARSE_VERSION
 
 /* These are used to across multiple objects. */
 #define PEPY_OBJECT_GET(OBJ, ATTR)                                          \
@@ -154,9 +137,9 @@ static void pepy_import_dealloc(pepy_import *self) {
   Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
-PEPY_OBJECT_GET(import, name)
-PEPY_OBJECT_GET(import, sym)
-PEPY_OBJECT_GET(import, addr)
+PEPY_OBJECT_GET(import, name);
+PEPY_OBJECT_GET(import, sym);
+PEPY_OBJECT_GET(import, addr);
 
 static PyGetSetDef pepy_import_getseters[] = {
     OBJECTGETTER(import, name, "Name"),
@@ -228,9 +211,9 @@ static void pepy_export_dealloc(pepy_export *self) {
   Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
-PEPY_OBJECT_GET(export, mod)
-PEPY_OBJECT_GET(export, func)
-PEPY_OBJECT_GET(export, addr)
+PEPY_OBJECT_GET(export, mod);
+PEPY_OBJECT_GET(export, func);
+PEPY_OBJECT_GET(export, addr);
 
 static PyGetSetDef pepy_export_getseters[] = {
     OBJECTGETTER(export, mod, "Module"),
@@ -302,8 +285,8 @@ static void pepy_relocation_dealloc(pepy_relocation *self) {
   Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
-PEPY_OBJECT_GET(relocation, type)
-PEPY_OBJECT_GET(relocation, addr)
+PEPY_OBJECT_GET(relocation, type);
+PEPY_OBJECT_GET(relocation, addr);
 
 static PyGetSetDef pepy_relocation_getseters[] = {
     OBJECTGETTER(relocation, type, "Type"),
@@ -390,15 +373,15 @@ static void pepy_section_dealloc(pepy_section *self) {
   Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
-PEPY_OBJECT_GET(section, name)
-PEPY_OBJECT_GET(section, base)
-PEPY_OBJECT_GET(section, length)
-PEPY_OBJECT_GET(section, virtaddr)
-PEPY_OBJECT_GET(section, virtsize)
-PEPY_OBJECT_GET(section, numrelocs)
-PEPY_OBJECT_GET(section, numlinenums)
-PEPY_OBJECT_GET(section, characteristics)
-PEPY_OBJECT_GET(section, data)
+PEPY_OBJECT_GET(section, name);
+PEPY_OBJECT_GET(section, base);
+PEPY_OBJECT_GET(section, length);
+PEPY_OBJECT_GET(section, virtaddr);
+PEPY_OBJECT_GET(section, virtsize);
+PEPY_OBJECT_GET(section, numrelocs);
+PEPY_OBJECT_GET(section, numlinenums);
+PEPY_OBJECT_GET(section, characteristics);
+PEPY_OBJECT_GET(section, data);
 
 static PyGetSetDef pepy_section_getseters[] = {
     OBJECTGETTER(section, name, "Name"),
@@ -495,16 +478,16 @@ static void pepy_resource_dealloc(pepy_resource *self) {
   Py_TYPE(self)->tp_free((PyObject *) self);
 }
 
-PEPY_OBJECT_GET(resource, type_str)
-PEPY_OBJECT_GET(resource, name_str)
-PEPY_OBJECT_GET(resource, lang_str)
-PEPY_OBJECT_GET(resource, type)
-PEPY_OBJECT_GET(resource, name)
-PEPY_OBJECT_GET(resource, lang)
-PEPY_OBJECT_GET(resource, codepage)
-PEPY_OBJECT_GET(resource, RVA)
-PEPY_OBJECT_GET(resource, size)
-PEPY_OBJECT_GET(resource, data)
+PEPY_OBJECT_GET(resource, type_str);
+PEPY_OBJECT_GET(resource, name_str);
+PEPY_OBJECT_GET(resource, lang_str);
+PEPY_OBJECT_GET(resource, type);
+PEPY_OBJECT_GET(resource, name);
+PEPY_OBJECT_GET(resource, lang);
+PEPY_OBJECT_GET(resource, codepage);
+PEPY_OBJECT_GET(resource, RVA);
+PEPY_OBJECT_GET(resource, size);
+PEPY_OBJECT_GET(resource, data);
 
 static PyObject *pepy_resource_type_as_str(PyObject *self, PyObject *args) {
   PyObject *ret;
@@ -587,7 +570,7 @@ static PyObject *pepy_resource_type_as_str(PyObject *self, PyObject *args) {
       break;
   }
 
-  ret = PyString_FromString(str);
+  ret = PyUnicode_FromString(str);
   if (!ret) {
     PyErr_SetString(pepy_error, "Unable to create return string.");
     return NULL;
@@ -704,7 +687,8 @@ static PyObject *pepy_parsed_get_entry_point(PyObject *self, PyObject *args) {
   return ret;
 }
 
-static PyObject *pepy_parsed_get_machine_as_str(PyObject *self, PyObject *args) {
+static PyObject *pepy_parsed_get_machine_as_str(PyObject *self,
+                                                PyObject *args) {
   PyObject *ret;
   const char *str;
 
@@ -712,7 +696,7 @@ static PyObject *pepy_parsed_get_machine_as_str(PyObject *self, PyObject *args) 
   if (!str)
     Py_RETURN_NONE;
 
-  ret = PyString_FromString(str);
+  ret = PyUnicode_FromString(str);
   if (!ret) {
     PyErr_SetString(pepy_error, "Unable to create return string.");
     return NULL;
@@ -721,7 +705,8 @@ static PyObject *pepy_parsed_get_machine_as_str(PyObject *self, PyObject *args) 
   return ret;
 }
 
-static PyObject *pepy_parsed_get_subsystem_as_str(PyObject *self, PyObject *args) {
+static PyObject *pepy_parsed_get_subsystem_as_str(PyObject *self,
+                                                  PyObject *args) {
   PyObject *ret;
   const char *str;
 
@@ -729,7 +714,7 @@ static PyObject *pepy_parsed_get_subsystem_as_str(PyObject *self, PyObject *args
   if (!str)
     Py_RETURN_NONE;
 
-  ret = PyString_FromString(str);
+  ret = PyUnicode_FromString(str);
   if (!ret) {
     PyErr_SetString(pepy_error, "Unable to create return string.");
     return NULL;
@@ -802,10 +787,10 @@ static PyObject *pepy_data_converter(bounded_buffer *data) {
 }
 
 int section_callback(void *cbd,
-                     VA base,
-                     std::string &name,
-                     image_section_header s,
-                     bounded_buffer *data) {
+                     const VA &base,
+                     const std::string &name,
+                     const image_section_header &s,
+                     const bounded_buffer *data) {
   uint32_t buflen;
   PyObject *sect;
   PyObject *tuple;
@@ -876,7 +861,7 @@ static PyObject *pepy_parsed_get_sections(PyObject *self, PyObject *args) {
   return ret;
 }
 
-int resource_callback(void *cbd, resource r) {
+int resource_callback(void *cbd, const resource &r) {
   PyObject *rsrc;
   PyObject *tuple;
   PyObject *list = (PyObject *) cbd;
@@ -885,15 +870,6 @@ int resource_callback(void *cbd, resource r) {
    * The tuple item order is important here. It is passed into the
    * section type initialization and parsed there.
    */
-#if PY_MAJOR_VERSION >= 3
-  tuple = Py_BuildValue("u#u#u#IIIIIIO&",
-                        r.type_str.c_str(),
-                        r.type_str.length() / 2,
-                        r.name_str.c_str(),
-                        r.name_str.length() / 2,
-                        r.lang_str.c_str(),
-                        r.lang_str.length() / 2,
-#else
   tuple = Py_BuildValue("s#s#s#IIIIIIO&",
                         r.type_str.c_str(),
                         r.type_str.length(),
@@ -901,7 +877,6 @@ int resource_callback(void *cbd, resource r) {
                         r.name_str.length(),
                         r.lang_str.c_str(),
                         r.lang_str.length(),
-#endif
                         r.type,
                         r.name,
                         r.lang,
@@ -946,7 +921,7 @@ static PyObject *pepy_parsed_get_resources(PyObject *self, PyObject *args) {
 }
 
 int import_callback(void *cbd,
-                    VA addr,
+                    const VA &addr,
                     const std::string &name,
                     const std::string &sym) {
   PyObject *imp;
@@ -993,7 +968,10 @@ static PyObject *pepy_parsed_get_imports(PyObject *self, PyObject *args) {
   return ret;
 }
 
-int export_callback(void *cbd, VA addr, std::string &mod, std::string &func) {
+int export_callback(void *cbd,
+                    const VA &addr,
+                    const std::string &mod,
+                    const std::string &func) {
   PyObject *exp;
   PyObject *tuple;
   PyObject *list = (PyObject *) cbd;
@@ -1042,7 +1020,7 @@ static PyObject *pepy_parsed_get_exports(PyObject *self, PyObject *args) {
   return ret;
 }
 
-int reloc_callback(void *cbd, VA addr, reloc_type type) {
+int reloc_callback(void *cbd, const VA &addr, const reloc_type &type) {
   PyObject *reloc;
   PyObject *tuple;
   PyObject *list = (PyObject *) cbd;
@@ -1089,21 +1067,20 @@ static PyObject *pepy_parsed_get_relocations(PyObject *self, PyObject *args) {
 
 #define PEPY_PARSED_GET(ATTR, VAL)                                         \
   static PyObject *pepy_parsed_get_##ATTR(PyObject *self, void *closure) { \
-    PyObject *ret =                                                        \
-        PyLong_FromUnsignedLongLong(                                       \
-            ((pepy_parsed *) self)->pe->peHeader.nt.VAL);                  \
+    PyObject *ret = PyLong_FromUnsignedLongLong(                           \
+        ((pepy_parsed *) self)->pe->peHeader.nt.VAL);                      \
     if (!ret)                                                              \
       PyErr_SetString(PyExc_AttributeError, "Error getting attribute.");   \
     return ret;                                                            \
   }
 
-PEPY_PARSED_GET(signature, Signature)
-PEPY_PARSED_GET(machine, FileHeader.Machine)
-PEPY_PARSED_GET(numberofsections, FileHeader.NumberOfSections)
-PEPY_PARSED_GET(timedatestamp, FileHeader.TimeDateStamp)
-PEPY_PARSED_GET(numberofsymbols, FileHeader.NumberOfSymbols)
-PEPY_PARSED_GET(characteristics, FileHeader.Characteristics)
-PEPY_PARSED_GET(magic, OptionalMagic)
+PEPY_PARSED_GET(signature, Signature);
+PEPY_PARSED_GET(machine, FileHeader.Machine);
+PEPY_PARSED_GET(numberofsections, FileHeader.NumberOfSections);
+PEPY_PARSED_GET(timedatestamp, FileHeader.TimeDateStamp);
+PEPY_PARSED_GET(numberofsymbols, FileHeader.NumberOfSymbols);
+PEPY_PARSED_GET(characteristics, FileHeader.Characteristics);
+PEPY_PARSED_GET(magic, OptionalMagic);
 
 /*
  * This is used to get things from the optional header, which can be either
@@ -1134,8 +1111,8 @@ PEPY_PARSED_GET(magic, OptionalMagic)
     return ret;                                                            \
   }
 
-PEPY_PARSED_GET_OPTIONAL(majorlinkerver, MajorLinkerVersion)
-PEPY_PARSED_GET_OPTIONAL(minorlinkerver, MinorLinkerVersion)
+PEPY_PARSED_GET_OPTIONAL(majorlinkerver, MajorLinkerVersion);
+PEPY_PARSED_GET_OPTIONAL(minorlinkerver, MinorLinkerVersion);
 PEPY_PARSED_GET_OPTIONAL(codesize, SizeOfCode);
 PEPY_PARSED_GET_OPTIONAL(initdatasize, SizeOfInitializedData);
 PEPY_PARSED_GET_OPTIONAL(uninitdatasize, SizeOfUninitializedData);
@@ -1337,7 +1314,7 @@ static PyObject *pepy_parse(PyObject *self, PyObject *args) {
 static PyMethodDef pepy_methods[] = {
     {"parse", pepy_parse, METH_VARARGS, "Parse PE from file."}, {NULL}};
 
-static PyObject *pepi_module_init(void) {
+PyMODINIT_FUNC PyInit_pepy(void) {
   PyObject *m;
 
   if (PyType_Ready(&pepy_parsed_type) < 0 ||
@@ -1348,7 +1325,6 @@ static PyObject *pepi_module_init(void) {
       PyType_Ready(&pepy_resource_type) < 0)
     return NULL;
 
-#if PY_MAJOR_VERSION >= 3
   static struct PyModuleDef moduledef = {
       PyModuleDef_HEAD_INIT,
       "pepy",
@@ -1360,13 +1336,8 @@ static PyObject *pepi_module_init(void) {
       NULL,
       NULL,
   };
-#endif
 
-#if PY_MAJOR_VERSION >= 3
   m = PyModule_Create(&moduledef);
-#else
-  m = Py_InitModule3("pepy", pepy_methods, "Python interface to pe-parse.");
-#endif
   if (!m)
     return NULL;
 
@@ -1393,6 +1364,8 @@ static PyObject *pepi_module_init(void) {
   PyModule_AddObject(m, "pepy_resource", (PyObject *) &pepy_resource_type);
 
   PyModule_AddStringMacro(m, PEPY_VERSION);
+  PyModule_AddStringMacro(m, PEPARSE_VERSION);
+  PyModule_AddStringConstant(m, "__version__", PEPY_VERSION);
 
   PyModule_AddIntMacro(m, MZ_MAGIC);
   PyModule_AddIntMacro(m, NT_MAGIC);
@@ -1456,13 +1429,3 @@ static PyObject *pepi_module_init(void) {
 
   return m;
 }
-
-#if PY_MAJOR_VERSION >= 3
-PyMODINIT_FUNC PyInit_pepy(void) {
-  return pepi_module_init();
-}
-#else
-PyMODINIT_FUNC initpepy(void) {
-  pepi_module_init();
-}
-#endif

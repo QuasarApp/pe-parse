@@ -23,14 +23,16 @@ THE SOFTWARE.
 */
 
 #include <algorithm>
+#include <array>
+#include <cassert>
 #include <cstring>
 #include <iostream>
-#include <vector>
 #include <stdexcept>
+#include <vector>
 
-#include <parser-library/nt-headers.h>
-#include <parser-library/parse.h>
-#include <parser-library/to_string.h>
+#include <pe-parse/nt-headers.h>
+#include <pe-parse/parse.h>
+#include <pe-parse/to_string.h>
 
 namespace peparse {
 
@@ -122,21 +124,372 @@ struct parsed_pe_internal {
   std::vector<symbol> symbols;
 };
 
+// String representation of Rich header object types
+static const std::string kProdId_C = "[ C ]";
+static const std::string kProdId_CPP = "[C++]";
+static const std::string kProdId_RES = "[RES]";
+static const std::string kProdId_IMP = "[IMP]";
+static const std::string kProdId_EXP = "[EXP]";
+static const std::string kProdId_ASM = "[ASM]";
+static const std::string kProdId_LNK = "[LNK]";
+static const std::string kProdId_UNK = "[ ? ]";
+
+// Mapping of Rich header Product ID to object type string
+// Source: https://github.com/dishather/richprint/blob/master/comp_id.txt
+static const std::map<std::uint16_t, std::string> ProductIdMap = {
+    {std::make_pair(static_cast<std::uint16_t>(0x0000), kProdId_UNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0002), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0004), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0006), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x000A), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x000B), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x000F), kProdId_ASM)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0015), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0016), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0019), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x001C), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x001D), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x003D), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x003F), kProdId_EXP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0040), kProdId_ASM)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0045), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x005A), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x005C), kProdId_EXP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x005D), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x005E), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x005F), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0060), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x006D), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x006E), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0078), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x007A), kProdId_EXP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x007B), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x007C), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x007D), kProdId_ASM)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0083), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0084), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0091), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0092), kProdId_EXP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0093), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0094), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0095), kProdId_ASM)},
+    {std::make_pair(static_cast<std::uint16_t>(0x009A), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x009B), kProdId_EXP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x009C), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x009D), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x009E), kProdId_ASM)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00AA), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00AB), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00C9), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00CA), kProdId_EXP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00CB), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00CC), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00CD), kProdId_ASM)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00CE), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00CF), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00DB), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00DC), kProdId_EXP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00DD), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00DE), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00DF), kProdId_ASM)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00E0), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00E1), kProdId_CPP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x00FF), kProdId_RES)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0100), kProdId_EXP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0101), kProdId_IMP)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0102), kProdId_LNK)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0103), kProdId_ASM)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0104), kProdId_C)},
+    {std::make_pair(static_cast<std::uint16_t>(0x0105), kProdId_CPP)}};
+
+// Mapping of Rich header build number to version strings
+static const std::map<std::uint16_t, const std::string> ProductMap = {
+    // Source: https://github.com/dishather/richprint/blob/master/comp_id.txt
+    {std::make_pair(static_cast<std::uint16_t>(0x0000), "Imported Functions")},
+    {std::make_pair(static_cast<std::uint16_t>(0x0684),
+                    "VS97 v5.0 SP3 cvtres 5.00.1668")},
+    {std::make_pair(static_cast<std::uint16_t>(0x06B8),
+                    "VS98 v6.0 cvtres build 1720")},
+    {std::make_pair(static_cast<std::uint16_t>(0x06C8),
+                    "VS98 v6.0 SP6 cvtres build 1736")},
+    {std::make_pair(static_cast<std::uint16_t>(0x1C87),
+                    "VS97 v5.0 SP3 link 5.10.7303")},
+    {std::make_pair(static_cast<std::uint16_t>(0x5E92),
+                    "VS2015 v14.0 UPD3 build 24210")},
+    {std::make_pair(static_cast<std::uint16_t>(0x5E95),
+                    "VS2015 UPD3 build 24213")},
+
+    // http://bytepointer.com/articles/the_microsoft_rich_header.htm
+    {std::make_pair(static_cast<std::uint16_t>(0x0BEC),
+                    "VS2003 v7.1 Free Toolkit .NET build 3052")},
+    {std::make_pair(static_cast<std::uint16_t>(0x0C05),
+                    "VS2003 v7.1 .NET build 3077")},
+    {std::make_pair(static_cast<std::uint16_t>(0x0FC3),
+                    "VS2003 v7.1 | Windows Server 2003 SP1 DDK build 4035")},
+    {std::make_pair(static_cast<std::uint16_t>(0x1C83), "MASM 6.13.7299")},
+    {std::make_pair(static_cast<std::uint16_t>(0x178E),
+                    "VS2003 v7.1 SP1 .NET build 6030")},
+    {std::make_pair(static_cast<std::uint16_t>(0x1FE8),
+                    "VS98 v6.0 RTM/SP1/SP2 build 8168")},
+    {std::make_pair(static_cast<std::uint16_t>(0x1FE9),
+                    "VB 6.0/SP1/SP2 build 8169")},
+    {std::make_pair(static_cast<std::uint16_t>(0x20FC), "MASM 6.14.8444")},
+    {std::make_pair(static_cast<std::uint16_t>(0x20FF),
+                    "VC++ 6.0 SP3 build 8447")},
+    {std::make_pair(static_cast<std::uint16_t>(0x212F),
+                    "VB 6.0 SP3 build 8495")},
+    {std::make_pair(static_cast<std::uint16_t>(0x225F),
+                    "VS 6.0 SP4 build 8799")},
+    {std::make_pair(static_cast<std::uint16_t>(0x2263), "MASM 6.15.8803")},
+    {std::make_pair(static_cast<std::uint16_t>(0x22AD),
+                    "VB 6.0 SP4 build 8877")},
+    {std::make_pair(static_cast<std::uint16_t>(0x2304),
+                    "VB 6.0 SP5 build 8964")},
+    {std::make_pair(static_cast<std::uint16_t>(0x2306),
+                    "VS 6.0 SP5 build 8966")},
+    //  {std::make_pair(static_cast<std::uint16_t>(0x2346), "MASM 6.15.9030
+    //  (VS.NET 7.0 BETA 1)")},
+    {std::make_pair(static_cast<std::uint16_t>(0x2346),
+                    "VS 7.0 2000 Beta 1 build 9030")},
+    {std::make_pair(static_cast<std::uint16_t>(0x2354),
+                    "VS 6.0 SP5 Processor Pack build 9044")},
+    {std::make_pair(static_cast<std::uint16_t>(0x2426),
+                    "VS2001 v7.0 Beta 2 build 9254")},
+    {std::make_pair(static_cast<std::uint16_t>(0x24FA),
+                    "VS2002 v7.0 .NET build 9466")},
+    {std::make_pair(static_cast<std::uint16_t>(0x2636),
+                    "VB 6.0 SP6 / VC++ build 9782")},
+    {std::make_pair(static_cast<std::uint16_t>(0x26E3),
+                    "VS2002 v7.0 SP1 build 9955")},
+    {std::make_pair(static_cast<std::uint16_t>(0x520D),
+                    "VS2013 v12.[0,1] build 21005")},
+    {std::make_pair(static_cast<std::uint16_t>(0x521E),
+                    "VS2008 v9.0 build 21022")},
+    {std::make_pair(static_cast<std::uint16_t>(0x56C7),
+                    "VS2015 v14.0 build 22215")},
+    {std::make_pair(static_cast<std::uint16_t>(0x59F2),
+                    "VS2015 v14.0 build 23026")},
+    {std::make_pair(static_cast<std::uint16_t>(0x5BD2),
+                    "VS2015 v14.0 UPD1 build 23506")},
+    {std::make_pair(static_cast<std::uint16_t>(0x5D10),
+                    "VS2015 v14.0 UPD2 build 23824")},
+    {std::make_pair(static_cast<std::uint16_t>(0x5E97),
+                    "VS2015 v14.0 UPD3.1 build 24215")},
+    {std::make_pair(static_cast<std::uint16_t>(0x7725),
+                    "VS2013 v12.0 UPD2 build 30501")},
+    {std::make_pair(static_cast<std::uint16_t>(0x766F),
+                    "VS2010 v10.0 build 30319")},
+    {std::make_pair(static_cast<std::uint16_t>(0x7809),
+                    "VS2008 v9.0 SP1 build 30729")},
+    {std::make_pair(static_cast<std::uint16_t>(0x797D),
+                    "VS2013 v12.0 UPD4 build 31101")},
+    {std::make_pair(static_cast<std::uint16_t>(0x9D1B),
+                    "VS2010 v10.0 SP1 build 40219")},
+    {std::make_pair(static_cast<std::uint16_t>(0x9EB5),
+                    "VS2013 v12.0 UPD5 build 40629")},
+    {std::make_pair(static_cast<std::uint16_t>(0xC497),
+                    "VS2005 v8.0 (Beta) build 50327")},
+    {std::make_pair(static_cast<std::uint16_t>(0xC627),
+                    "VS2005 v8.0 | VS2012 v11.0 build 50727")},
+    {std::make_pair(static_cast<std::uint16_t>(0xC751),
+                    "VS2012 v11.0 Nov CTP build 51025")},
+    {std::make_pair(static_cast<std::uint16_t>(0xC7A2),
+                    "VS2012 v11.0 UPD1 build 51106")},
+    {std::make_pair(static_cast<std::uint16_t>(0xEB9B),
+                    "VS2012 v11.0 UPD2 build 60315")},
+    {std::make_pair(static_cast<std::uint16_t>(0xECC2),
+                    "VS2012 v11.0 UPD3 build 60610")},
+    {std::make_pair(static_cast<std::uint16_t>(0xEE66),
+                    "VS2012 v11.0 UPD4 build 61030")},
+    {std::make_pair(static_cast<std::uint16_t>(0x5E9A),
+                    "VS2015 v14.0 build 24218")},
+    {std::make_pair(static_cast<std::uint16_t>(0x61BB),
+                    "VS2017 v14.1 build 25019")},
+
+    // https://dev.to/yumetodo/list-of-mscver-and-mscfullver-8nd
+    {std::make_pair(static_cast<std::uint16_t>(0x2264),
+                    "VS 6 [SP5,SP6] build 8804")},
+    {std::make_pair(static_cast<std::uint16_t>(0x23D8), "Windows XP SP1 DDK")},
+    {std::make_pair(static_cast<std::uint16_t>(0x0883),
+                    "Windows Server 2003 DDK")},
+    {std::make_pair(static_cast<std::uint16_t>(0x08F4),
+                    "VS2003 v7.1 .NET Beta build 2292")},
+    {std::make_pair(static_cast<std::uint16_t>(0x9D76),
+                    "Windows Server 2003 SP1 DDK (for AMD64)")},
+    {std::make_pair(static_cast<std::uint16_t>(0x9E9F),
+                    "VS2005 v8.0 Beta 1 build 40607")},
+    {std::make_pair(static_cast<std::uint16_t>(0xC427),
+                    "VS2005 v8.0 Beta 2 build 50215")},
+    {std::make_pair(static_cast<std::uint16_t>(0xC490),
+                    "VS2005 v8.0 build 50320")},
+    {std::make_pair(static_cast<std::uint16_t>(0x50E2),
+                    "VS2008 v9.0 Beta 2 build 20706")},
+    {std::make_pair(static_cast<std::uint16_t>(0x501A),
+                    "VS2010 v10.0 Beta 1 build 20506")},
+    {std::make_pair(static_cast<std::uint16_t>(0x520B),
+                    "VS2010 v10.0 Beta 2 build 21003")},
+    {std::make_pair(static_cast<std::uint16_t>(0x5089),
+                    "VS2013 v12.0 Preview build 20617")},
+    {std::make_pair(static_cast<std::uint16_t>(0x515B),
+                    "VS2013 v12.0 RC build 20827")},
+    {std::make_pair(static_cast<std::uint16_t>(0x527A),
+                    "VS2013 v12.0 Nov CTP build 21114")},
+    {std::make_pair(static_cast<std::uint16_t>(0x63A3),
+                    "VS2017 v15.3.3 build 25507")},
+    {std::make_pair(static_cast<std::uint16_t>(0x63C6),
+                    "VS2017 v15.4.4 build 25542")},
+    {std::make_pair(static_cast<std::uint16_t>(0x63CB),
+                    "VS2017 v15.4.5 build 25547")},
+    {std::make_pair(static_cast<std::uint16_t>(0x7674),
+                    "VS2013 v12.0 UPD2 RC build 30324")},
+
+    // https://walbourn.github.io/visual-studio-2015-update-2/
+    {std::make_pair(static_cast<std::uint16_t>(0x5D6E),
+                    "VS2015 v14.0 UPD2 build 23918")},
+
+    // https://walbourn.github.io/visual-studio-2017/
+    {std::make_pair(static_cast<std::uint16_t>(0x61B9),
+                    "VS2017 v15.[0,1] build 25017")},
+    {std::make_pair(static_cast<std::uint16_t>(0x63A2),
+                    "VS2017 v15.2 build 25019")},
+
+    // https://walbourn.github.io/vs-2017-15-5-update/
+    {std::make_pair(static_cast<std::uint16_t>(0x64E6),
+                    "VS2017 v15 build 25830")},
+    {std::make_pair(static_cast<std::uint16_t>(0x64E7),
+                    "VS2017 v15.5.2 build 25831")},
+    {std::make_pair(static_cast<std::uint16_t>(0x64EA),
+                    "VS2017 v15.5.[3,4] build 25834")},
+    {std::make_pair(static_cast<std::uint16_t>(0x64EB),
+                    "VS2017 v15.5.[5,6,7] build 25835")},
+
+    // https://walbourn.github.io/vs-2017-15-6-update/
+    {std::make_pair(static_cast<std::uint16_t>(0x6610),
+                    "VS2017 v15.6.[0,1,2] build 26128")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6611),
+                    "VS2017 v15.6.[3,4] build 26129")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6613),
+                    "VS2017 v15.6.6 build 26131")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6614),
+                    "VS2017 v15.6.7 build 26132")},
+
+    // https://devblogs.microsoft.com/visualstudio/visual-studio-2017-update/
+    {std::make_pair(static_cast<std::uint16_t>(0x6723),
+                    "VS2017 v15.1 build 26403")},
+
+    // https://walbourn.github.io/vs-2017-15-7-update/
+    {std::make_pair(static_cast<std::uint16_t>(0x673C),
+                    "VS2017 v15.7.[0,1] build 26428")},
+    {std::make_pair(static_cast<std::uint16_t>(0x673D),
+                    "VS2017 v15.7.2 build 26429")},
+    {std::make_pair(static_cast<std::uint16_t>(0x673E),
+                    "VS2017 v15.7.3 build 26430")},
+    {std::make_pair(static_cast<std::uint16_t>(0x673F),
+                    "VS2017 v15.7.4 build 26431")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6741),
+                    "VS2017 v15.7.5 build 26433")},
+
+    // https://walbourn.github.io/visual-studio-2019/
+    {std::make_pair(static_cast<std::uint16_t>(0x6B74),
+                    "VS2019 v16.0.0 build 27508")},
+
+    // https://walbourn.github.io/vs-2017-15-8-update/
+    {std::make_pair(static_cast<std::uint16_t>(0x6866),
+                    "VS2017 v15.8.0 build 26726")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6869),
+                    "VS2017 v15.8.4 build 26729")},
+    {std::make_pair(static_cast<std::uint16_t>(0x686A),
+                    "VS2017 v15.8.9 build 26730")},
+    {std::make_pair(static_cast<std::uint16_t>(0x686C),
+                    "VS2017 v15.8.5 build 26732")},
+
+    // https://walbourn.github.io/vs-2017-15-9-update/
+    {std::make_pair(static_cast<std::uint16_t>(0x698F),
+                    "VS2017 v15.9.[0,1] build 27023")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6990),
+                    "VS2017 v15.9.2 build 27024")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6991),
+                    "VS2017 v15.9.4 build 27025")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6992),
+                    "VS2017 v15.9.5 build 27026")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6993),
+                    "VS2017 v15.9.7 build 27027")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6996),
+                    "VS2017 v15.9.11 build 27030")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6997),
+                    "VS2017 v15.9.12 build 27031")},
+    {std::make_pair(static_cast<std::uint16_t>(0x6998),
+                    "VS2017 v15.9.14 build 27032")},
+    {std::make_pair(static_cast<std::uint16_t>(0x699A),
+                    "VS2017 v15.9.16 build 27034")},
+
+    // https://walbourn.github.io/visual-studio-2019/
+    {std::make_pair(static_cast<std::uint16_t>(0x6B74),
+                    "VS2019 v16.0.0 RTM build 27508")},
+
+    // https://walbourn.github.io/vs-2019-update-1/
+    {std::make_pair(static_cast<std::uint16_t>(0x6C36),
+                    "VS2019 v16.1.2 UPD1 build 27702")},
+
+    // https://walbourn.github.io/vs-2019-update-2/
+    {std::make_pair(static_cast<std::uint16_t>(0x6D01),
+                    "VS2019 v16.2.3 UPD2 build 27905")},
+
+    // https://walbourn.github.io/vs-2019-update-3/
+    {std::make_pair(static_cast<std::uint16_t>(0x6DC9),
+                    "VS2019 v16.3.2 UPD3 build 28105")},
+
+    // https://walbourn.github.io/visual-studio-2013-update-3/
+    {std::make_pair(static_cast<std::uint16_t>(0x7803),
+                    "VS2013 v12.0 UPD3 build 30723")},
+
+    // experimentation
+    {std::make_pair(static_cast<std::uint16_t>(0x685B),
+                    "VS2017 v15.8.? build 26715")},
+};
+
+static const std::string kUnknownProduct = "<unknown>";
+
+// Returns a stringified Rich header object type given a product id
+const std::string &GetRichObjectType(std::uint16_t prodId) {
+
+  auto it = ProductIdMap.find(prodId);
+  if (it != ProductIdMap.end()) {
+    return it->second;
+  } else {
+    return kProdId_UNK;
+  }
+}
+
+// Returns a stringified Rich header product name given a build number
+const std::string &GetRichProductName(std::uint16_t buildNum) {
+
+  auto it = ProductMap.find(buildNum);
+  if (it != ProductMap.end()) {
+    return it->second;
+  } else {
+    return kUnknownProduct;
+  }
+}
+
 std::uint32_t err = 0;
 std::string err_loc;
 
-static const char *pe_err_str[] = {"None",
-                                   "Out of memory",
-                                   "Invalid header",
-                                   "Invalid section",
-                                   "Invalid resource",
-                                   "Unable to get section for VA",
-                                   "Unable to read data",
-                                   "Unable to open",
-                                   "Unable to stat",
-                                   "Bad magic",
-                                   "Invalid buffer",
-                                   "Invalid address",};
+static const char *pe_err_str[] = {
+    "None",
+    "Out of memory",
+    "Invalid header",
+    "Invalid section",
+    "Invalid resource",
+    "Unable to get section for VA",
+    "Unable to read data",
+    "Unable to open",
+    "Unable to stat",
+    "Bad magic",
+    "Invalid buffer",
+    "Invalid address",
+    "Invalid size",
+};
 
 std::uint32_t GetPEErr() {
   return err;
@@ -211,8 +564,9 @@ const char *GetSymbolTableStorageClassName(std::uint8_t id) {
   }
 }
 
-static bool
-readCString(const bounded_buffer &buffer, std::uint32_t off, std::string &result) {
+static bool readCString(const bounded_buffer &buffer,
+                        std::uint32_t off,
+                        std::string &result) {
   if (off < buffer.bufLen) {
     std::uint8_t *p = buffer.buf;
     std::uint32_t n = buffer.bufLen;
@@ -243,32 +597,44 @@ bool getSecForVA(const std::vector<section> &secs, VA v, section &sec) {
   return false;
 }
 
-void IterRsrc(parsed_pe *pe, iterRsrc cb, void *cbd) {
-  parsed_pe_internal *pint = pe->internal;
-
-  for (resource r : pint->rsrcs) {
+void IterRich(parsed_pe *pe, iterRich cb, void *cbd) {
+  for (rich_entry &r : pe->peHeader.rich.Entries) {
     if (cb(cbd, r) != 0) {
       break;
     }
   }
-
-  return;
 }
 
-bool parse_resource_id(bounded_buffer *data, std::uint32_t id, std::string &result) {
-  std::uint8_t c;
-  std::uint16_t len;
+void IterRsrc(parsed_pe *pe, iterRsrc cb, void *cbd) {
+  parsed_pe_internal *pint = pe->internal;
 
+  for (const resource &r : pint->rsrcs) {
+    if (cb(cbd, r) != 0) {
+      break;
+    }
+  }
+}
+
+bool parse_resource_id(bounded_buffer *data,
+                       std::uint32_t id,
+                       std::string &result) {
+  std::uint16_t len;
   if (!readWord(data, id, len)) {
     return false;
   }
   id += 2;
-  for (std::uint32_t i = 0; i < len * 2U; i++) {
-    if (!readByte(data, id + i, c)) {
+
+  std::uint32_t rawSize = len * 2U;
+  UCharString rawString;
+  for (std::uint32_t i = 0; i < rawSize; i += 2) {
+    char16_t c;
+    if (!readChar16(data, id + i, c)) {
       return false;
     }
-    result.push_back(static_cast<char>(c));
+    rawString.push_back(c);
   }
+
+  result = from_utf16(rawString);
   return true;
 }
 
@@ -305,7 +671,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
       rde = new resource_dir_entry;
     }
 
-    if (!readDword(sectionData, o + _offset(__typeof__(*rde), ID), rde->ID)) {
+    if (!readDword(sectionData, o + offsetof(__typeof__(*rde), ID), rde->ID)) {
       PE_ERR(PEERR_READ);
       if (dirent == nullptr) {
         delete rde;
@@ -313,7 +679,8 @@ bool parse_resource_table(bounded_buffer *sectionData,
       return false;
     }
 
-    if (!readDword(sectionData, o + _offset(__typeof__(*rde), RVA), rde->RVA)) {
+    if (!readDword(
+            sectionData, o + offsetof(__typeof__(*rde), RVA), rde->RVA)) {
       PE_ERR(PEERR_READ);
       if (dirent == nullptr) {
         delete rde;
@@ -357,9 +724,10 @@ bool parse_resource_table(bounded_buffer *sectionData,
         }
       }
     } else {
-      /* .rsrc can accomodate up to 2**31 levels, but Windows only uses 3 by convention.
-       * As such, any depth above 3 indicates potentially unchecked recusion.
-       * See: https://docs.microsoft.com/en-us/windows/desktop/debug/pe-format#the-rsrc-section
+      /* .rsrc can accomodate up to 2**31 levels, but Windows only uses 3 by
+       * convention. As such, any depth above 3 indicates potentially unchecked
+       * recusion. See:
+       * https://docs.microsoft.com/en-us/windows/desktop/debug/pe-format#the-rsrc-section
        */
 
       PE_ERR(PEERR_RESC);
@@ -393,7 +761,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
        */
 
       if (!readDword(sectionData,
-                     rde->RVA + _offset(__typeof__(rdat), RVA),
+                     rde->RVA + offsetof(__typeof__(rdat), RVA),
                      rdat.RVA)) {
         PE_ERR(PEERR_READ);
         if (dirent == nullptr) {
@@ -403,7 +771,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
       }
 
       if (!readDword(sectionData,
-                     rde->RVA + _offset(__typeof__(rdat), size),
+                     rde->RVA + offsetof(__typeof__(rdat), size),
                      rdat.size)) {
         PE_ERR(PEERR_READ);
         if (dirent == nullptr) {
@@ -413,7 +781,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
       }
 
       if (!readDword(sectionData,
-                     rde->RVA + _offset(__typeof__(rdat), codepage),
+                     rde->RVA + offsetof(__typeof__(rdat), codepage),
                      rdat.codepage)) {
         PE_ERR(PEERR_READ);
         if (dirent == nullptr) {
@@ -423,7 +791,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
       }
 
       if (!readDword(sectionData,
-                     rde->RVA + _offset(__typeof__(rdat), reserved),
+                     rde->RVA + offsetof(__typeof__(rdat), reserved),
                      rdat.reserved)) {
         PE_ERR(PEERR_READ);
         if (dirent == nullptr) {
@@ -544,7 +912,8 @@ bool getSections(bounded_buffer *b,
     // now we have the section header information, so fill in a section
     // object appropriately
     section thisSec;
-    for (std::uint32_t charIndex = 0; charIndex < NT_SHORT_NAME_LEN; charIndex++) {
+    for (std::uint32_t charIndex = 0; charIndex < NT_SHORT_NAME_LEN;
+         charIndex++) {
       std::uint8_t c = curSec.Name[charIndex];
       if (c == 0) {
         break;
@@ -568,8 +937,21 @@ bool getSections(bounded_buffer *b,
     std::uint32_t highOff = lowOff + curSec.SizeOfRawData;
     thisSec.sectionData = splitBuffer(fileBegin, lowOff, highOff);
 
+    // GH#109: we trusted [lowOff, highOff) to be a range that yields
+    // a valid bounded_buffer, despite these being user-controllable.
+    // splitBuffer correctly handles this, but we failed to check for
+    // the nullptr it returns as a sentinel.
+    if (thisSec.sectionData == nullptr) {
+      return false;
+    }
+
     secs.push_back(thisSec);
   }
+
+  std::sort(
+      secs.begin(), secs.end(), [](const section &lhs, const section &rhs) {
+        return lhs.sec.PointerToRawData < rhs.sec.PointerToRawData;
+      });
 
   return true;
 }
@@ -613,15 +995,15 @@ bool readOptionalHeader(bounded_buffer *b, optional_header_32 &header) {
 
   for (std::uint32_t i = 0; i < header.NumberOfRvaAndSizes; i++) {
     std::uint32_t c = (i * sizeof(data_directory));
-    c += _offset(optional_header_32, DataDirectory[0]);
+    c += offsetof(optional_header_32, DataDirectory[0]);
     std::uint32_t o;
 
-    o = c + _offset(data_directory, VirtualAddress);
+    o = c + offsetof(data_directory, VirtualAddress);
     if (!readDword(b, o, header.DataDirectory[i].VirtualAddress)) {
       return false;
     }
 
-    o = c + _offset(data_directory, Size);
+    o = c + offsetof(data_directory, Size);
     if (!readDword(b, o, header.DataDirectory[i].Size)) {
       return false;
     }
@@ -668,15 +1050,15 @@ bool readOptionalHeader64(bounded_buffer *b, optional_header_64 &header) {
 
   for (std::uint32_t i = 0; i < header.NumberOfRvaAndSizes; i++) {
     std::uint32_t c = (i * sizeof(data_directory));
-    c += _offset(optional_header_64, DataDirectory[0]);
+    c += offsetof(optional_header_64, DataDirectory[0]);
     std::uint32_t o;
 
-    o = c + _offset(data_directory, VirtualAddress);
+    o = c + offsetof(data_directory, VirtualAddress);
     if (!readDword(b, o, header.DataDirectory[i].VirtualAddress)) {
       return false;
     }
 
-    o = c + _offset(data_directory, Size);
+    o = c + offsetof(data_directory, Size);
     if (!readDword(b, o, header.DataDirectory[i].Size)) {
       return false;
     }
@@ -711,7 +1093,7 @@ bool readNtHeader(bounded_buffer *b, nt_header_32 &header) {
 
   header.Signature = pe_magic;
   bounded_buffer *fhb =
-      splitBuffer(b, _offset(nt_header_32, FileHeader), b->bufLen);
+      splitBuffer(b, offsetof(nt_header_32, FileHeader), b->bufLen);
 
   if (fhb == nullptr) {
     PE_ERR(PEERR_MEM);
@@ -750,7 +1132,7 @@ bool readNtHeader(bounded_buffer *b, nt_header_32 &header) {
    * buffer regardless.
    */
   bounded_buffer *ohb =
-      splitBuffer(b, _offset(nt_header_32, OptionalHeader), b->bufLen);
+      splitBuffer(b, offsetof(nt_header_32, OptionalHeader), b->bufLen);
 
   if (ohb == nullptr) {
     deleteBuffer(fhb);
@@ -794,30 +1176,251 @@ bool readNtHeader(bounded_buffer *b, nt_header_32 &header) {
   return true;
 }
 
+// zero extends its first argument to 32 bits and then performs a rotate left
+// operation equal to the second arguments value of the first argument’s bits
+static inline std::uint32_t rol(std::uint32_t val, std::uint32_t num) {
+  assert(num < 32);
+  // Disable MSVC warning for unary minus operator applied to unsigned type
+#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
+#pragma warning(push)
+#pragma warning(disable : 4146)
+#endif
+  // https://blog.regehr.org/archives/1063
+  return (val << num) | (val >> (-num & 31));
+#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
+#pragma warning(pop)
+#endif
+}
+
+std::uint32_t calculateRichChecksum(const bounded_buffer *b, pe_header &p) {
+
+  // First, calculate the sum of the DOS header bytes each rotated left the
+  // number of times their position relative to the start of the DOS header e.g.
+  // second byte is rotated left 2x using rol operation
+  std::uint32_t checksum = 0;
+
+  for (uint8_t i = 0; i < RICH_OFFSET; i++) {
+
+    // skip over dos e_lfanew field at offset 0x3C
+    if (i >= 0x3C && i <= 0x3F) {
+      continue;
+    }
+    checksum += rol(b->buf[i], i & 0x1F);
+  }
+
+  // Next, take summation of each Rich header entry by combining its ProductId
+  // and BuildNumber into a single 32 bit number and rotating by its count.
+  for (rich_entry entry : p.rich.Entries) {
+    std::uint32_t num =
+        static_cast<std::uint32_t>((entry.ProductId << 16) | entry.BuildNumber);
+    checksum += rol(num, entry.Count & 0x1F);
+  }
+
+  checksum += RICH_OFFSET;
+
+  return checksum;
+}
+
+bool readRichHeader(bounded_buffer *rich_buf,
+                    std::uint32_t key,
+                    rich_header &rich_hdr) {
+  if (rich_buf == nullptr) {
+    return false;
+  }
+
+  std::uint32_t encrypted_dword;
+  std::uint32_t decrypted_dword;
+
+  // Confirm DanS signature exists first.
+  // The first decrypted DWORD value of the rich header
+  // at offset 0 should be 0x536e6144 aka the "DanS" signature
+  if (!readDword(rich_buf, 0, encrypted_dword)) {
+    PE_ERR(PEERR_READ);
+    return false;
+  }
+
+  decrypted_dword = encrypted_dword ^ key;
+
+  if (decrypted_dword == RICH_MAGIC_START) {
+    // DanS magic found
+    rich_hdr.isPresent = true;
+    rich_hdr.StartSignature = decrypted_dword;
+  } else {
+    // DanS magic not found
+    rich_hdr.isPresent = false;
+    return false;
+  }
+
+  // Iterate over the remaining entries.
+  // Start from buffer offset 16 because after "DanS" there
+  // are three DWORDs of zero padding that can be skipped over.
+  // a DWORD is 4 bytes. Loop is incrementing 8 bytes, however
+  // we are reading two DWORDS at a time, which is the size
+  // of one rich header entry.
+  for (std::uint32_t i = 16; i < rich_buf->bufLen - 8; i += 8) {
+    rich_entry entry;
+    // Read first DWORD of entry and decrypt it
+    if (!readDword(rich_buf, i, encrypted_dword)) {
+      PE_ERR(PEERR_READ);
+      return false;
+    }
+    decrypted_dword = encrypted_dword ^ key;
+    // The high WORD of the first DWORD is the Product ID
+    entry.ProductId = (decrypted_dword & 0xFFFF0000) >> 16;
+    // The low WORD of the first DWORD is the Build Number
+    entry.BuildNumber = (decrypted_dword & 0xFFFF);
+
+    // The second DWORD represents the use count
+    if (!readDword(rich_buf, i + 4, encrypted_dword)) {
+      PE_ERR(PEERR_READ);
+      return false;
+    }
+    decrypted_dword = encrypted_dword ^ key;
+    // The full 32-bit DWORD is the count
+    entry.Count = decrypted_dword;
+
+    // Preserve the individual entry
+    rich_hdr.Entries.push_back(entry);
+  }
+
+  // Preserve the end signature aka "Rich" magic
+  if (!readDword(rich_buf, rich_buf->bufLen - 4, rich_hdr.EndSignature)) {
+    PE_ERR(PEERR_READ);
+    return false;
+  };
+  if (rich_hdr.EndSignature != RICH_MAGIC_END) {
+    PE_ERR(PEERR_MAGIC);
+    return false;
+  }
+
+  // Preserve the decryption key
+  rich_hdr.DecryptionKey = key;
+
+  return true;
+}
+
+bool readDosHeader(bounded_buffer *file, dos_header &dos_hdr) {
+  if (file == nullptr) {
+    return false;
+  }
+
+  READ_WORD(file, 0, dos_hdr, e_magic);
+  READ_WORD(file, 0, dos_hdr, e_cblp);
+  READ_WORD(file, 0, dos_hdr, e_cp);
+  READ_WORD(file, 0, dos_hdr, e_crlc);
+  READ_WORD(file, 0, dos_hdr, e_cparhdr);
+  READ_WORD(file, 0, dos_hdr, e_minalloc);
+  READ_WORD(file, 0, dos_hdr, e_maxalloc);
+  READ_WORD(file, 0, dos_hdr, e_ss);
+  READ_WORD(file, 0, dos_hdr, e_sp);
+  READ_WORD(file, 0, dos_hdr, e_csum);
+  READ_WORD(file, 0, dos_hdr, e_ip);
+  READ_WORD(file, 0, dos_hdr, e_cs);
+  READ_WORD(file, 0, dos_hdr, e_lfarlc);
+  READ_WORD(file, 0, dos_hdr, e_ovno);
+  READ_WORD(file, 0, dos_hdr, e_res[0]);
+  READ_WORD(file, 0, dos_hdr, e_res[1]);
+  READ_WORD(file, 0, dos_hdr, e_res[2]);
+  READ_WORD(file, 0, dos_hdr, e_res[3]);
+  READ_WORD(file, 0, dos_hdr, e_oemid);
+  READ_WORD(file, 0, dos_hdr, e_oeminfo);
+  READ_WORD(file, 0, dos_hdr, e_res2[0]);
+  READ_WORD(file, 0, dos_hdr, e_res2[1]);
+  READ_WORD(file, 0, dos_hdr, e_res2[2]);
+  READ_WORD(file, 0, dos_hdr, e_res2[3]);
+  READ_WORD(file, 0, dos_hdr, e_res2[4]);
+  READ_WORD(file, 0, dos_hdr, e_res2[5]);
+  READ_WORD(file, 0, dos_hdr, e_res2[6]);
+  READ_WORD(file, 0, dos_hdr, e_res2[7]);
+  READ_WORD(file, 0, dos_hdr, e_res2[8]);
+  READ_WORD(file, 0, dos_hdr, e_res2[9]);
+  READ_DWORD(file, 0, dos_hdr, e_lfanew);
+
+  return true;
+}
+
 bool getHeader(bounded_buffer *file, pe_header &p, bounded_buffer *&rem) {
   if (file == nullptr) {
     return false;
   }
 
-  // start by reading MZ
-  std::uint16_t tmp = 0;
-  std::uint32_t curOffset = 0;
-  if (!readWord(file, curOffset, tmp)) {
-    PE_ERR(PEERR_READ);
-    return false;
-  }
-  if (tmp != MZ_MAGIC) {
+  // read the DOS header
+  readDosHeader(file, p.dos);
+
+  if (p.dos.e_magic != MZ_MAGIC) {
     PE_ERR(PEERR_MAGIC);
     return false;
   }
 
-  // read the offset to the NT headers
-  std::uint32_t offset;
-  if (!readDword(file, _offset(dos_header, e_lfanew), offset)) {
-    PE_ERR(PEERR_READ);
-    return false;
+  // get the offset to the NT headers
+  std::uint32_t offset = p.dos.e_lfanew;
+  std::uint32_t curOffset = offset;
+
+  // read rich header
+  std::uint32_t dword;
+  std::uint32_t rich_end_signature_offset = 0;
+  std::uint32_t xor_key;
+  bool found_rich = false;
+
+  // Start reading from RICH_OFFSET (0x80), a known Rich header offset.
+  // Note: 0x80 is based on anecdotal evidence.
+  //
+  // Iterate over the DWORDs, hence why i increments 4 bytes at a time.
+  for (std::uint32_t i = RICH_OFFSET; i < offset; i += 4) {
+    if (!readDword(file, i, dword)) {
+      PE_ERR(PEERR_READ);
+      return false;
+    }
+
+    // Found the trailing Rich signature
+    if (dword == RICH_MAGIC_END) {
+      found_rich = true;
+      rich_end_signature_offset = i;
+      break;
+    }
   }
-  curOffset += offset;
+
+  if (found_rich) {
+    // Get the XOR decryption key.  It is the DWORD immediately
+    // after the Rich signature.
+    if (!readDword(file, rich_end_signature_offset + 4, xor_key)) {
+      PE_ERR(PEERR_READ);
+      return false;
+    }
+
+    // Split the Rich header out into its own buffer
+    bounded_buffer *richBuf =
+        splitBuffer(file, 0x80, rich_end_signature_offset + 4);
+    if (richBuf == nullptr) {
+      return false;
+    }
+
+    readRichHeader(richBuf, xor_key, p.rich);
+    if (richBuf != nullptr) {
+      deleteBuffer(richBuf);
+    }
+
+    // Split the DOS header into a separate buffer which
+    // starts at offset 0 and has length 0x80
+    bounded_buffer *dosBuf = splitBuffer(file, 0, RICH_OFFSET);
+    if (dosBuf == nullptr) {
+      return false;
+    }
+    // Calculate checksum
+    p.rich.Checksum = calculateRichChecksum(dosBuf, p);
+    if (p.rich.Checksum == p.rich.DecryptionKey) {
+      p.rich.isValid = true;
+    } else {
+      p.rich.isValid = false;
+    }
+    if (dosBuf != nullptr) {
+      deleteBuffer(dosBuf);
+    }
+
+    // Rich header not present
+  } else {
+    p.rich.isPresent = false;
+  }
 
   // now, we can read out the fields of the NT headers
   bounded_buffer *ntBuf = splitBuffer(file, curOffset, file->bufLen);
@@ -837,12 +1440,12 @@ bool getHeader(bounded_buffer *file, pe_header &p, bounded_buffer *&rem) {
   std::uint32_t rem_size;
   if (p.nt.OptionalMagic == NT_OPTIONAL_32_MAGIC) {
     // signature + file_header + optional_header_32
-    rem_size =
-        sizeof(std::uint32_t) + sizeof(file_header) + sizeof(optional_header_32);
+    rem_size = sizeof(std::uint32_t) + sizeof(file_header) +
+               sizeof(optional_header_32);
   } else if (p.nt.OptionalMagic == NT_OPTIONAL_64_MAGIC) {
     // signature + file_header + optional_header_64
-    rem_size =
-        sizeof(std::uint32_t) + sizeof(file_header) + sizeof(optional_header_64);
+    rem_size = sizeof(std::uint32_t) + sizeof(file_header) +
+               sizeof(optional_header_64);
   } else {
     PE_ERR(PEERR_MAGIC);
     deleteBuffer(ntBuf);
@@ -887,7 +1490,7 @@ bool getExports(parsed_pe *p) {
     // get the name of this module
     std::uint32_t nameRva;
     if (!readDword(s.sectionData,
-                   rvaofft + _offset(export_dir_table, NameRVA),
+                   rvaofft + offsetof(export_dir_table, NameRVA),
                    nameRva)) {
       return false;
     }
@@ -915,7 +1518,7 @@ bool getExports(parsed_pe *p) {
     // now, get all the named export symbols
     std::uint32_t numNames;
     if (!readDword(s.sectionData,
-                   rvaofft + _offset(export_dir_table, NumberOfNamePointers),
+                   rvaofft + offsetof(export_dir_table, NumberOfNamePointers),
                    numNames)) {
       return false;
     }
@@ -924,7 +1527,7 @@ bool getExports(parsed_pe *p) {
       // get the names section
       std::uint32_t namesRVA;
       if (!readDword(s.sectionData,
-                     rvaofft + _offset(export_dir_table, NamePointerRVA),
+                     rvaofft + offsetof(export_dir_table, NamePointerRVA),
                      namesRVA)) {
         return false;
       }
@@ -949,7 +1552,8 @@ bool getExports(parsed_pe *p) {
       // get the EAT section
       std::uint32_t eatRVA;
       if (!readDword(s.sectionData,
-                     rvaofft + _offset(export_dir_table, ExportAddressTableRVA),
+                     rvaofft +
+                         offsetof(export_dir_table, ExportAddressTableRVA),
                      eatRVA)) {
         return false;
       }
@@ -973,7 +1577,7 @@ bool getExports(parsed_pe *p) {
       // get the ordinal base
       std::uint32_t ordinalBase;
       if (!readDword(s.sectionData,
-                     rvaofft + _offset(export_dir_table, OrdinalBase),
+                     rvaofft + offsetof(export_dir_table, OrdinalBase),
                      ordinalBase)) {
         return false;
       }
@@ -981,7 +1585,7 @@ bool getExports(parsed_pe *p) {
       // get the ordinal table
       std::uint32_t ordinalTableRVA;
       if (!readDword(s.sectionData,
-                     rvaofft + _offset(export_dir_table, OrdinalTableRVA),
+                     rvaofft + offsetof(export_dir_table, OrdinalTableRVA),
                      ordinalTableRVA)) {
         return false;
       }
@@ -1124,13 +1728,13 @@ bool getRelocations(parsed_pe *p) {
       std::uint32_t blockSize;
 
       if (!readDword(d.sectionData,
-                     rvaofft + _offset(reloc_block, PageRVA),
+                     rvaofft + offsetof(reloc_block, PageRVA),
                      pageRva)) {
         return false;
       }
 
       if (!readDword(d.sectionData,
-                     rvaofft + _offset(reloc_block, BlockSize),
+                     rvaofft + offsetof(reloc_block, BlockSize),
                      blockSize)) {
         return false;
       }
@@ -1374,8 +1978,8 @@ bool getImports(parsed_pe *p) {
           ent.moduleName = modName;
           p->internal->imports.push_back(ent);
         } else {
-          std::string symName =
-              "ORDINAL_" + modName + "_" + to_string<std::uint32_t>(oval, std::dec);
+          std::string symName = "ORDINAL_" + modName + "_" +
+                                to_string<std::uint32_t>(oval, std::dec);
 
           importent ent;
 
@@ -1424,7 +2028,8 @@ bool getSymbolTable(parsed_pe *p) {
 
   std::uint32_t offset = p->peHeader.nt.FileHeader.PointerToSymbolTable;
 
-  for (std::uint32_t i = 0; i < p->peHeader.nt.FileHeader.NumberOfSymbols; i++) {
+  for (std::uint32_t i = 0; i < p->peHeader.nt.FileHeader.NumberOfSymbols;
+       i++) {
     symbol sym;
 
     // Read name
@@ -1452,7 +2057,8 @@ bool getSymbolTable(parsed_pe *p) {
         strOffset += sizeof(std::uint8_t);
       }
     } else {
-      for (std::uint8_t n = 0; n < NT_SHORT_NAME_LEN && sym.name.shortName[n] != 0;
+      for (std::uint8_t n = 0;
+           n < NT_SHORT_NAME_LEN && sym.name.shortName[n] != 0;
            n++) {
         sym.strName.push_back(static_cast<char>(sym.name.shortName[n]));
       }
@@ -1712,31 +2318,36 @@ bool getSymbolTable(parsed_pe *p) {
       }
 
     } else {
-//      std::ios::fmtflags originalStreamFlags(std::cerr.flags());
+#ifdef PEPARSE_LIBRARY_WARNINGS
+      std::ios::fmtflags originalStreamFlags(std::cerr.flags());
 
-//      auto storageClassName = GetSymbolTableStorageClassName(sym.storageClass);
-//      if (storageClassName == nullptr) {
-//        std::cerr << "Warning: Skipping auxiliary symbol of type 0x" << std::hex
-//                  << static_cast<std::uint32_t>(sym.storageClass)
-//                  << " at offset 0x" << std::hex << offset << "\n";
-//      } else {
-//        std::cerr << "Warning: Skipping auxiliary symbol of type "
-//                  << storageClassName << " at offset 0x" << std::hex << offset
-//                  << "\n";
-//      }
+      auto storageClassName = GetSymbolTableStorageClassName(sym.storageClass);
+      if (storageClassName == nullptr) {
+        std::cerr << "Warning: Skipping auxiliary symbol of type 0x" << std::hex
+                  << static_cast<std::uint32_t>(sym.storageClass)
+                  << " at offset 0x" << std::hex << offset << "\n";
+      } else {
 
-//      std::cerr.flags(originalStreamFlags);
+        std::cerr << "Warning: Skipping auxiliary symbol of type "
+                  << storageClassName << " at offset 0x" << std::hex << offset
+                  << "\n";
+      }
+
+      std::cerr.flags(originalStreamFlags);
+#endif
       offset = nextSymbolOffset;
     }
 
     if (offset != nextSymbolOffset) {
-//      std::ios::fmtflags originalStreamFlags(std::cerr.flags());
+#ifdef PEPARSE_LIBRARY_WARNINGS
+      std::ios::fmtflags originalStreamFlags(std::cerr.flags());
 
-//      std::cerr << "Warning: Invalid internal offset (current: 0x" << std::hex
-//                << offset << ", expected: 0x" << std::hex << nextSymbolOffset
-//                << ")\n";
+      std::cerr << "Warning: Invalid internal offset (current: 0x" << std::hex
+                << offset << ", expected: 0x" << std::hex << nextSymbolOffset
+                << ")\n";
 
-//      std::cerr.flags(originalStreamFlags);
+      std::cerr.flags(originalStreamFlags);
+#endif
       offset = nextSymbolOffset;
     }
   }
@@ -1744,7 +2355,7 @@ bool getSymbolTable(parsed_pe *p) {
   return true;
 }
 
-parsed_pe *ParsePEFromFile(const char *filePath) {
+parsed_pe *ParsePEFromBuffer(bounded_buffer *buffer) {
   // First, create a new parsed_pe structure
   // We pass std::nothrow parameter to new so in case of failure it returns
   // nullptr instead of throwing exception std::bad_alloc.
@@ -1756,13 +2367,7 @@ parsed_pe *ParsePEFromFile(const char *filePath) {
   }
 
   // Make a new buffer object to hold just our file data
-  p->fileBuffer = readFileToFileBuffer(filePath);
-
-  if (p->fileBuffer == nullptr) {
-    delete p;
-    // err is set by readFileToFileBuffer
-    return nullptr;
-  }
+  p->fileBuffer = buffer;
 
   p->internal = new (std::nothrow) parsed_pe_internal();
 
@@ -1838,6 +2443,28 @@ parsed_pe *ParsePEFromFile(const char *filePath) {
   return p;
 }
 
+parsed_pe *ParsePEFromFile(const char *filePath) {
+  auto buffer = readFileToFileBuffer(filePath);
+
+  if (buffer == nullptr) {
+    // err is set by readFileToFileBuffer
+    return nullptr;
+  }
+
+  return ParsePEFromBuffer(buffer);
+}
+
+parsed_pe *ParsePEFromPointer(std::uint8_t *ptr, std::uint32_t sz) {
+  auto buffer = makeBufferFromPointer(ptr, sz);
+
+  if (buffer == nullptr) {
+    // err is set by makeBufferFromPointer
+    return nullptr;
+  }
+
+  return ParsePEFromBuffer(buffer);
+}
+
 void DestructParsedPE(parsed_pe *p) {
   if (p == nullptr) {
     return;
@@ -1865,7 +2492,7 @@ void DestructParsedPE(parsed_pe *p) {
 void IterImpVAString(parsed_pe *pe, iterVAStr cb, void *cbd) {
   std::vector<importent> &l = pe->internal->imports;
 
-  for (importent i : l) {
+  for (importent &i : l) {
     if (cb(cbd, i.addr, i.moduleName, i.symbolName) != 0) {
       break;
     }
@@ -1878,7 +2505,7 @@ void IterImpVAString(parsed_pe *pe, iterVAStr cb, void *cbd) {
 void IterRelocs(parsed_pe *pe, iterReloc cb, void *cbd) {
   std::vector<reloc> &l = pe->internal->relocs;
 
-  for (reloc r : l) {
+  for (reloc &r : l) {
     if (cb(cbd, r.shiftedAddr, r.type) != 0) {
       break;
     }
@@ -1891,7 +2518,7 @@ void IterRelocs(parsed_pe *pe, iterReloc cb, void *cbd) {
 void IterSymbols(parsed_pe *pe, iterSymbol cb, void *cbd) {
   std::vector<symbol> &l = pe->internal->symbols;
 
-  for (symbol s : l) {
+  for (symbol &s : l) {
     if (cb(cbd,
            s.strName,
            s.value,
@@ -1910,7 +2537,7 @@ void IterSymbols(parsed_pe *pe, iterSymbol cb, void *cbd) {
 void IterExpVA(parsed_pe *pe, iterExp cb, void *cbd) {
   std::vector<exportent> &l = pe->internal->exports;
 
-  for (exportent i : l) {
+  for (exportent &i : l) {
     if (cb(cbd, i.addr, i.moduleName, i.symbolName) != 0) {
       break;
     }
@@ -1923,7 +2550,7 @@ void IterExpVA(parsed_pe *pe, iterExp cb, void *cbd) {
 void IterSec(parsed_pe *pe, iterSec cb, void *cbd) {
   parsed_pe_internal *pint = pe->internal;
 
-  for (section s : pint->secs) {
+  for (section &s : pint->secs) {
     if (cb(cbd, s.sectionBase, s.sectionName, s.sec, s.sectionData) != 0) {
       break;
     }
@@ -2035,6 +2662,70 @@ const char *GetSubsystemAsString(parsed_pe *pe) {
     default:
       return nullptr;
   }
+}
+
+bool GetDataDirectoryEntry(parsed_pe *pe,
+                           data_directory_kind dirnum,
+                           std::vector<std::uint8_t> &raw_entry) {
+  raw_entry.clear();
+
+  if (pe == nullptr) {
+    PE_ERR(PEERR_NONE);
+    return false;
+  }
+
+  data_directory dir;
+  VA addr;
+  if (pe->peHeader.nt.OptionalMagic == NT_OPTIONAL_32_MAGIC) {
+    dir = pe->peHeader.nt.OptionalHeader.DataDirectory[dirnum];
+    addr = dir.VirtualAddress + pe->peHeader.nt.OptionalHeader.ImageBase;
+  } else if (pe->peHeader.nt.OptionalMagic == NT_OPTIONAL_64_MAGIC) {
+    dir = pe->peHeader.nt.OptionalHeader64.DataDirectory[dirnum];
+    addr = dir.VirtualAddress + pe->peHeader.nt.OptionalHeader64.ImageBase;
+  } else {
+    PE_ERR(PEERR_MAGIC);
+    return false;
+  }
+
+  if (dir.Size <= 0) {
+    PE_ERR(PEERR_SIZE);
+    return false;
+  }
+
+  /* NOTE(ww): DIR_SECURITY is an annoying special case: its contents
+   * are never mapped into memory, so its "RVA" is actually a direct
+   * file offset.
+   * See:
+   * https://docs.microsoft.com/en-us/windows/win32/debug/pe-format#the-attribute-certificate-table-image-only
+   */
+  if (dirnum == DIR_SECURITY) {
+    auto *buf = splitBuffer(
+        pe->fileBuffer, dir.VirtualAddress, dir.VirtualAddress + dir.Size);
+    if (buf == nullptr) {
+      PE_ERR(PEERR_SIZE);
+      return false;
+    }
+
+    raw_entry.assign(buf->buf, buf->buf + buf->bufLen);
+    deleteBuffer(buf);
+  } else {
+    section sec;
+    if (!getSecForVA(pe->internal->secs, addr, sec)) {
+      PE_ERR(PEERR_SECTVA);
+      return false;
+    }
+
+    auto off = static_cast<std::uint32_t>(addr - sec.sectionBase);
+    if (off + dir.Size >= sec.sectionData->bufLen) {
+      PE_ERR(PEERR_SIZE);
+      return false;
+    }
+
+    raw_entry.assign(sec.sectionData->buf + off,
+                     sec.sectionData->buf + off + dir.Size);
+  }
+
+  return true;
 }
 
 } // namespace peparse

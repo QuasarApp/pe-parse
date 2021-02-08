@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 project(peaddrconv)
 
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -35,11 +35,10 @@ else ()
   endif ()
 endif ()
 
-find_package(peparse REQUIRED)
+find_package(pe-parse REQUIRED)
 
 add_executable(${PROJECT_NAME} main.cpp)
-target_link_libraries(${PROJECT_NAME} ${PEPARSE_LIBRARIES})
-target_include_directories(${PROJECT_NAME} PRIVATE ${PEPARSE_INCLUDE_DIR})
+target_link_libraries(${PROJECT_NAME} pe-parse::pe-parse)
 target_compile_options(${PROJECT_NAME} PRIVATE ${PEADDRCONV_CXXFLAGS})
 
 install(TARGETS ${PROJECT_NAME} DESTINATION "bin")

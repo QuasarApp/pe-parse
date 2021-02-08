@@ -22,16 +22,21 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <iostream>
-#include <iomanip>
-#include <sstream>
 #include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 
-#include <parser-library/parse.h>
+#include <pe-parse/parse.h>
+
+#include "vendor/argh.h"
 
 using namespace peparse;
 
-int printExps(void *N, VA funcAddr, std::string &mod, std::string &func) {
+int printExps(void *N,
+              const VA &funcAddr,
+              const std::string &mod,
+              const std::string &func) {
   static_cast<void>(N);
 
   auto address = static_cast<std::uint32_t>(funcAddr);
@@ -47,7 +52,7 @@ int printExps(void *N, VA funcAddr, std::string &mod, std::string &func) {
 }
 
 int printImports(void *N,
-                 VA impAddr,
+                 const VA &impAddr,
                  const std::string &modName,
                  const std::string &symName) {
   static_cast<void>(N);
@@ -59,33 +64,33 @@ int printImports(void *N,
   return 0;
 }
 
-int printRelocs(void *N, VA relocAddr, reloc_type type) {
+int printRelocs(void *N, const VA &relocAddr, const reloc_type &type) {
   static_cast<void>(N);
 
   std::cout << "TYPE: ";
   switch (type) {
-    case ABSOLUTE:
+    case RELOC_ABSOLUTE:
       std::cout << "ABSOLUTE";
       break;
-    case HIGH:
+    case RELOC_HIGH:
       std::cout << "HIGH";
       break;
-    case LOW:
+    case RELOC_LOW:
       std::cout << "LOW";
       break;
-    case HIGHLOW:
+    case RELOC_HIGHLOW:
       std::cout << "HIGHLOW";
       break;
-    case HIGHADJ:
+    case RELOC_HIGHADJ:
       std::cout << "HIGHADJ";
       break;
-    case MIPS_JMPADDR:
+    case RELOC_MIPS_JMPADDR:
       std::cout << "MIPS_JMPADDR";
       break;
-    case MIPS_JMPADDR16:
+    case RELOC_MIPS_JMPADDR16:
       std::cout << "MIPS_JMPADD16";
       break;
-    case DIR64:
+    case RELOC_DIR64:
       std::cout << "DIR64";
       break;
     default:
@@ -99,12 +104,12 @@ int printRelocs(void *N, VA relocAddr, reloc_type type) {
 }
 
 int printSymbols(void *N,
-                 std::string &strName,
-                 uint32_t &value,
-                 int16_t &sectionNumber,
-                 uint16_t &type,
-                 uint8_t &storageClass,
-                 uint8_t &numberOfAuxSymbols) {
+                 const std::string &strName,
+                 const uint32_t &value,
+                 const int16_t &sectionNumber,
+                 const uint16_t &type,
+                 const uint8_t &storageClass,
+                 const uint8_t &numberOfAuxSymbols) {
   static_cast<void>(N);
 
   std::cout << "Symbol Name: " << strName << "\n";
@@ -227,7 +232,19 @@ int printSymbols(void *N,
   return 0;
 }
 
-int printRsrc(void *N, resource r) {
+int printRich(void *N, const rich_entry &r) {
+  static_cast<void>(N);
+  std::cout << std::dec;
+  std::cout << std::setw(10) << "ProdId:" << std::setw(7) << r.ProductId;
+  std::cout << std::setw(10) << "Build:" << std::setw(7) << r.BuildNumber;
+  std::cout << std::setw(10) << "Name:" << std::setw(40)
+            << GetRichProductName(r.BuildNumber) << " "
+            << GetRichObjectType(r.ProductId);
+  std::cout << std::setw(10) << "Count:" << std::setw(7) << r.Count << "\n";
+  return 0;
+}
+
+int printRsrc(void *N, const resource &r) {
   static_cast<void>(N);
 
   if (r.type_str.length())
@@ -252,10 +269,10 @@ int printRsrc(void *N, resource r) {
 }
 
 int printSecs(void *N,
-              VA secBase,
-              std::string &secName,
-              image_section_header s,
-              bounded_buffer *data) {
+              const VA &secBase,
+              const std::string &secName,
+              const image_section_header &s,
+              const bounded_buffer *data) {
   static_cast<void>(N);
   static_cast<void>(s);
 
@@ -264,114 +281,173 @@ int printSecs(void *N,
   if (data)
     std::cout << "Sec Size: " << std::dec << data->bufLen << "\n";
   else
-    std::cout << "Sec Size: 0" << "\n";
+    std::cout << "Sec Size: 0"
+              << "\n";
   return 0;
 }
 
-#define DUMP_FIELD(x)                                                   \
-  std::cout << "" #x << ": 0x";                                         \
-  std::cout << std::hex << static_cast<std::uint64_t>(p->peHeader.nt.x) \
-            << "\n";
-#define DUMP_DEC_FIELD(x)                                               \
-  std::cout << "" #x << ": ";                                           \
-  std::cout << std::dec << static_cast<std::uint64_t>(p->peHeader.nt.x) \
-            << "\n";
+#define DUMP_FIELD(x)           \
+  std::cout << "" #x << ": 0x"; \
+  std::cout << std::hex << static_cast<std::uint64_t>(p->peHeader.x) << "\n";
+#define DUMP_DEC_FIELD(x)     \
+  std::cout << "" #x << ": "; \
+  std::cout << std::dec << static_cast<std::uint64_t>(p->peHeader.x) << "\n";
+#define DUMP_BOOL_FIELD(x)    \
+  std::cout << "" #x << ": "; \
+  std::cout << std::boolalpha << static_cast<bool>(p->peHeader.x) << "\n";
 
 int main(int argc, char *argv[]) {
-  if (argc != 2 || (argc == 2 && std::strcmp(argv[1], "--help") == 0)) {
+
+  argh::parser cmdl(argv);
+
+  if (cmdl[{"-h", "--help"}] || argc <= 1) {
     std::cout << "dump-pe utility from Trail of Bits\n";
     std::cout << "Repository: https://github.com/trailofbits/pe-parse\n\n";
     std::cout << "Usage:\n\tdump-pe /path/to/executable.exe\n";
+    return 0;
+  } else if (cmdl[{"-v", "--version"}]) {
+    std::cout << "dump-pe (pe-parse) version " << PEPARSE_VERSION << "\n";
+    return 0;
+  }
+
+  parsed_pe *p = ParsePEFromFile(cmdl[1].c_str());
+
+  if (p == nullptr) {
+    std::cout << "Error: " << GetPEErr() << " (" << GetPEErrString() << ")"
+              << "\n";
+    std::cout << "Location: " << GetPEErrLoc() << "\n";
     return 1;
   }
 
-  parsed_pe *p = ParsePEFromFile(argv[1]);
-
   if (p != NULL) {
+    // Print DOS header
+    DUMP_FIELD(dos.e_magic);
+    DUMP_FIELD(dos.e_cp);
+    DUMP_FIELD(dos.e_crlc);
+    DUMP_FIELD(dos.e_cparhdr);
+    DUMP_FIELD(dos.e_minalloc);
+    DUMP_FIELD(dos.e_maxalloc);
+    DUMP_FIELD(dos.e_ss);
+    DUMP_FIELD(dos.e_sp);
+    DUMP_FIELD(dos.e_csum);
+    DUMP_FIELD(dos.e_ip);
+    DUMP_FIELD(dos.e_cs);
+    DUMP_FIELD(dos.e_lfarlc);
+    DUMP_FIELD(dos.e_ovno);
+    DUMP_FIELD(dos.e_res[0]);
+    DUMP_FIELD(dos.e_res[1]);
+    DUMP_FIELD(dos.e_res[2]);
+    DUMP_FIELD(dos.e_res[3]);
+    DUMP_FIELD(dos.e_oemid);
+    DUMP_FIELD(dos.e_oeminfo);
+    DUMP_FIELD(dos.e_res2[0]);
+    DUMP_FIELD(dos.e_res2[1]);
+    DUMP_FIELD(dos.e_res2[2]);
+    DUMP_FIELD(dos.e_res2[3]);
+    DUMP_FIELD(dos.e_res2[4]);
+    DUMP_FIELD(dos.e_res2[5]);
+    DUMP_FIELD(dos.e_res2[6]);
+    DUMP_FIELD(dos.e_res2[7]);
+    DUMP_FIELD(dos.e_res2[8]);
+    DUMP_FIELD(dos.e_res2[9]);
+    DUMP_FIELD(dos.e_lfanew);
+    // Print Rich header info
+    DUMP_BOOL_FIELD(rich.isPresent);
+    if (p->peHeader.rich.isPresent) {
+      DUMP_FIELD(rich.DecryptionKey);
+      DUMP_FIELD(rich.Checksum);
+      DUMP_BOOL_FIELD(rich.isValid);
+      IterRich(p, printRich, NULL);
+    }
     // print out some things
-    DUMP_FIELD(Signature);
-    DUMP_FIELD(FileHeader.Machine);
-    DUMP_FIELD(FileHeader.NumberOfSections);
-    DUMP_DEC_FIELD(FileHeader.TimeDateStamp);
-    DUMP_FIELD(FileHeader.PointerToSymbolTable);
-    DUMP_DEC_FIELD(FileHeader.NumberOfSymbols);
-    DUMP_FIELD(FileHeader.SizeOfOptionalHeader);
-    DUMP_FIELD(FileHeader.Characteristics);
+    DUMP_FIELD(nt.Signature);
+    DUMP_FIELD(nt.FileHeader.Machine);
+    DUMP_FIELD(nt.FileHeader.NumberOfSections);
+    DUMP_DEC_FIELD(nt.FileHeader.TimeDateStamp);
+    DUMP_FIELD(nt.FileHeader.PointerToSymbolTable);
+    DUMP_DEC_FIELD(nt.FileHeader.NumberOfSymbols);
+    DUMP_FIELD(nt.FileHeader.SizeOfOptionalHeader);
+    DUMP_FIELD(nt.FileHeader.Characteristics);
     if (p->peHeader.nt.OptionalMagic == NT_OPTIONAL_32_MAGIC) {
-      DUMP_FIELD(OptionalHeader.Magic);
-      DUMP_DEC_FIELD(OptionalHeader.MajorLinkerVersion);
-      DUMP_DEC_FIELD(OptionalHeader.MinorLinkerVersion);
-      DUMP_FIELD(OptionalHeader.SizeOfCode);
-      DUMP_FIELD(OptionalHeader.SizeOfInitializedData);
-      DUMP_FIELD(OptionalHeader.SizeOfUninitializedData);
-      DUMP_FIELD(OptionalHeader.AddressOfEntryPoint);
-      DUMP_FIELD(OptionalHeader.BaseOfCode);
-      DUMP_FIELD(OptionalHeader.BaseOfData);
-      DUMP_FIELD(OptionalHeader.ImageBase);
-      DUMP_FIELD(OptionalHeader.SectionAlignment);
-      DUMP_FIELD(OptionalHeader.FileAlignment);
-      DUMP_DEC_FIELD(OptionalHeader.MajorOperatingSystemVersion);
-      DUMP_DEC_FIELD(OptionalHeader.MinorOperatingSystemVersion);
-      DUMP_DEC_FIELD(OptionalHeader.Win32VersionValue);
-      DUMP_FIELD(OptionalHeader.SizeOfImage);
-      DUMP_FIELD(OptionalHeader.SizeOfHeaders);
-      DUMP_FIELD(OptionalHeader.CheckSum);
-      DUMP_FIELD(OptionalHeader.Subsystem);
-      DUMP_FIELD(OptionalHeader.DllCharacteristics);
-      DUMP_FIELD(OptionalHeader.SizeOfStackReserve);
-      DUMP_FIELD(OptionalHeader.SizeOfStackCommit);
-      DUMP_FIELD(OptionalHeader.SizeOfHeapReserve);
-      DUMP_FIELD(OptionalHeader.SizeOfHeapCommit);
-      DUMP_FIELD(OptionalHeader.LoaderFlags);
-      DUMP_DEC_FIELD(OptionalHeader.NumberOfRvaAndSizes);
+      DUMP_FIELD(nt.OptionalHeader.Magic);
+      DUMP_DEC_FIELD(nt.OptionalHeader.MajorLinkerVersion);
+      DUMP_DEC_FIELD(nt.OptionalHeader.MinorLinkerVersion);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfCode);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfInitializedData);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfUninitializedData);
+      DUMP_FIELD(nt.OptionalHeader.AddressOfEntryPoint);
+      DUMP_FIELD(nt.OptionalHeader.BaseOfCode);
+      DUMP_FIELD(nt.OptionalHeader.BaseOfData);
+      DUMP_FIELD(nt.OptionalHeader.ImageBase);
+      DUMP_FIELD(nt.OptionalHeader.SectionAlignment);
+      DUMP_FIELD(nt.OptionalHeader.FileAlignment);
+      DUMP_DEC_FIELD(nt.OptionalHeader.MajorOperatingSystemVersion);
+      DUMP_DEC_FIELD(nt.OptionalHeader.MinorOperatingSystemVersion);
+      DUMP_DEC_FIELD(nt.OptionalHeader.Win32VersionValue);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfImage);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfHeaders);
+      DUMP_FIELD(nt.OptionalHeader.CheckSum);
+      DUMP_FIELD(nt.OptionalHeader.Subsystem);
+      DUMP_FIELD(nt.OptionalHeader.DllCharacteristics);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfStackReserve);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfStackCommit);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfHeapReserve);
+      DUMP_FIELD(nt.OptionalHeader.SizeOfHeapCommit);
+      DUMP_FIELD(nt.OptionalHeader.LoaderFlags);
+      DUMP_DEC_FIELD(nt.OptionalHeader.NumberOfRvaAndSizes);
     } else {
-      DUMP_FIELD(OptionalHeader64.Magic);
-      DUMP_DEC_FIELD(OptionalHeader64.MajorLinkerVersion);
-      DUMP_DEC_FIELD(OptionalHeader64.MinorLinkerVersion);
-      DUMP_FIELD(OptionalHeader64.SizeOfCode);
-      DUMP_FIELD(OptionalHeader64.SizeOfInitializedData);
-      DUMP_FIELD(OptionalHeader64.SizeOfUninitializedData);
-      DUMP_FIELD(OptionalHeader64.AddressOfEntryPoint);
-      DUMP_FIELD(OptionalHeader64.BaseOfCode);
-      DUMP_FIELD(OptionalHeader64.ImageBase);
-      DUMP_FIELD(OptionalHeader64.SectionAlignment);
-      DUMP_FIELD(OptionalHeader64.FileAlignment);
-      DUMP_DEC_FIELD(OptionalHeader64.MajorOperatingSystemVersion);
-      DUMP_DEC_FIELD(OptionalHeader64.MinorOperatingSystemVersion);
-      DUMP_DEC_FIELD(OptionalHeader64.Win32VersionValue);
-      DUMP_FIELD(OptionalHeader64.SizeOfImage);
-      DUMP_FIELD(OptionalHeader64.SizeOfHeaders);
-      DUMP_FIELD(OptionalHeader64.CheckSum);
-      DUMP_FIELD(OptionalHeader64.Subsystem);
-      DUMP_FIELD(OptionalHeader64.DllCharacteristics);
-      DUMP_FIELD(OptionalHeader64.SizeOfStackReserve);
-      DUMP_FIELD(OptionalHeader64.SizeOfStackCommit);
-      DUMP_FIELD(OptionalHeader64.SizeOfHeapReserve);
-      DUMP_FIELD(OptionalHeader64.SizeOfHeapCommit);
-      DUMP_FIELD(OptionalHeader64.LoaderFlags);
-      DUMP_DEC_FIELD(OptionalHeader64.NumberOfRvaAndSizes);
+      DUMP_FIELD(nt.OptionalHeader64.Magic);
+      DUMP_DEC_FIELD(nt.OptionalHeader64.MajorLinkerVersion);
+      DUMP_DEC_FIELD(nt.OptionalHeader64.MinorLinkerVersion);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfCode);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfInitializedData);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfUninitializedData);
+      DUMP_FIELD(nt.OptionalHeader64.AddressOfEntryPoint);
+      DUMP_FIELD(nt.OptionalHeader64.BaseOfCode);
+      DUMP_FIELD(nt.OptionalHeader64.ImageBase);
+      DUMP_FIELD(nt.OptionalHeader64.SectionAlignment);
+      DUMP_FIELD(nt.OptionalHeader64.FileAlignment);
+      DUMP_DEC_FIELD(nt.OptionalHeader64.MajorOperatingSystemVersion);
+      DUMP_DEC_FIELD(nt.OptionalHeader64.MinorOperatingSystemVersion);
+      DUMP_DEC_FIELD(nt.OptionalHeader64.Win32VersionValue);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfImage);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfHeaders);
+      DUMP_FIELD(nt.OptionalHeader64.CheckSum);
+      DUMP_FIELD(nt.OptionalHeader64.Subsystem);
+      DUMP_FIELD(nt.OptionalHeader64.DllCharacteristics);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfStackReserve);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfStackCommit);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfHeapReserve);
+      DUMP_FIELD(nt.OptionalHeader64.SizeOfHeapCommit);
+      DUMP_FIELD(nt.OptionalHeader64.LoaderFlags);
+      DUMP_DEC_FIELD(nt.OptionalHeader64.NumberOfRvaAndSizes);
     }
 
 #undef DUMP_FIELD
 #undef DUMP_DEC_FIELD
 
-    std::cout << "Imports: " << "\n";
+    std::cout << "Imports: "
+              << "\n";
     IterImpVAString(p, printImports, NULL);
-    std::cout << "Relocations: " << "\n";
+    std::cout << "Relocations: "
+              << "\n";
     IterRelocs(p, printRelocs, NULL);
-    std::cout << "Symbols (symbol table): " << "\n";
+    std::cout << "Symbols (symbol table): "
+              << "\n";
     IterSymbols(p, printSymbols, NULL);
-    std::cout << "Sections: " << "\n";
+    std::cout << "Sections: "
+              << "\n";
     IterSec(p, printSecs, NULL);
-    std::cout << "Exports: " << "\n";
+    std::cout << "Exports: "
+              << "\n";
     IterExpVA(p, printExps, NULL);
 
     // read the first 8 bytes from the entry point and print them
     VA entryPoint;
     if (GetEntryPoint(p, entryPoint)) {
       std::cout << "First 8 bytes from entry point (0x";
-
-      std::cout << std::hex << entryPoint << "):" << "\n";
+      std::cout << std::hex << entryPoint << "):"
+                << "\n";
       for (std::size_t i = 0; i < 8; i++) {
         std::uint8_t b;
         if (!ReadByteAtVA(p, i + entryPoint, b)) {
@@ -384,14 +460,12 @@ int main(int argc, char *argv[]) {
       std::cout << "\n";
     }
 
-    std::cout << "Resources: " << "\n";
-    IterRsrc(p, printRsrc, NULL);
-    DestructParsedPE(p);
-  } else {
-    std::cout << "Error: " << GetPEErr() << " (" << GetPEErrString() << ")"
+    std::cout << "Resources: "
               << "\n";
-    std::cout << "Location: " << GetPEErrLoc() << "\n";
-  }
+    IterRsrc(p, printRsrc, NULL);
 
-  return 0;
+    DestructParsedPE(p);
+
+    return 0;
+  }
 }
