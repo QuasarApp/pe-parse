@@ -1,7 +1,7 @@
 /*
 The MIT License (MIT)
 
-Copyright (c) 2019 Trail of Bits, Inc.
+Copyright (c) 2020 Trail of Bits, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,14 +22,35 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <parser-library/to_string.h>
-#include <unicode/unistr.h>
+#include <Windows.h>
+#include <pe-parse/to_string.h>
 
 namespace peparse {
 std::string from_utf16(const UCharString &u) {
-  icu::UnicodeString utf16_string = icu::UnicodeString(u.data(), u.length());
   std::string result;
-  utf16_string.toUTF8String(result);
+  std::size_t size = WideCharToMultiByte(CP_UTF8,
+                                         0,
+                                         u.data(),
+                                         static_cast<int>(u.size()),
+                                         nullptr,
+                                         0,
+                                         nullptr,
+                                         nullptr);
+
+  if (size <= 0) {
+    return result;
+  }
+
+  result.reserve(size);
+  WideCharToMultiByte(CP_UTF8,
+                      0,
+                      u.data(),
+                      static_cast<int>(u.size()),
+                      &result[0],
+                      static_cast<int>(result.capacity()),
+                      nullptr,
+                      nullptr);
+
   return result;
 }
 } // namespace peparse

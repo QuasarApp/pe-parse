@@ -24,14 +24,15 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
 
-#include <parser-library/nt-headers.h>
-#include <parser-library/parse.h>
-#include <parser-library/to_string.h>
+#include <pe-parse/nt-headers.h>
+#include <pe-parse/parse.h>
+#include <pe-parse/to_string.h>
 
 namespace peparse {
 
@@ -597,7 +598,7 @@ bool getSecForVA(const std::vector<section> &secs, VA v, section &sec) {
 }
 
 void IterRich(parsed_pe *pe, iterRich cb, void *cbd) {
-  for (rich_entry r : pe->peHeader.rich.Entries) {
+  for (rich_entry &r : pe->peHeader.rich.Entries) {
     if (cb(cbd, r) != 0) {
       break;
     }
@@ -607,13 +608,11 @@ void IterRich(parsed_pe *pe, iterRich cb, void *cbd) {
 void IterRsrc(parsed_pe *pe, iterRsrc cb, void *cbd) {
   parsed_pe_internal *pint = pe->internal;
 
-  for (resource r : pint->rsrcs) {
+  for (const resource &r : pint->rsrcs) {
     if (cb(cbd, r) != 0) {
       break;
     }
   }
-
-  return;
 }
 
 bool parse_resource_id(bounded_buffer *data,
@@ -672,7 +671,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
       rde = new resource_dir_entry;
     }
 
-    if (!readDword(sectionData, o + _offset(__typeof__(*rde), ID), rde->ID)) {
+    if (!readDword(sectionData, o + offsetof(__typeof__(*rde), ID), rde->ID)) {
       PE_ERR(PEERR_READ);
       if (dirent == nullptr) {
         delete rde;
@@ -680,7 +679,8 @@ bool parse_resource_table(bounded_buffer *sectionData,
       return false;
     }
 
-    if (!readDword(sectionData, o + _offset(__typeof__(*rde), RVA), rde->RVA)) {
+    if (!readDword(
+            sectionData, o + offsetof(__typeof__(*rde), RVA), rde->RVA)) {
       PE_ERR(PEERR_READ);
       if (dirent == nullptr) {
         delete rde;
@@ -761,7 +761,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
        */
 
       if (!readDword(sectionData,
-                     rde->RVA + _offset(__typeof__(rdat), RVA),
+                     rde->RVA + offsetof(__typeof__(rdat), RVA),
                      rdat.RVA)) {
         PE_ERR(PEERR_READ);
         if (dirent == nullptr) {
@@ -771,7 +771,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
       }
 
       if (!readDword(sectionData,
-                     rde->RVA + _offset(__typeof__(rdat), size),
+                     rde->RVA + offsetof(__typeof__(rdat), size),
                      rdat.size)) {
         PE_ERR(PEERR_READ);
         if (dirent == nullptr) {
@@ -781,7 +781,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
       }
 
       if (!readDword(sectionData,
-                     rde->RVA + _offset(__typeof__(rdat), codepage),
+                     rde->RVA + offsetof(__typeof__(rdat), codepage),
                      rdat.codepage)) {
         PE_ERR(PEERR_READ);
         if (dirent == nullptr) {
@@ -791,7 +791,7 @@ bool parse_resource_table(bounded_buffer *sectionData,
       }
 
       if (!readDword(sectionData,
-                     rde->RVA + _offset(__typeof__(rdat), reserved),
+                     rde->RVA + offsetof(__typeof__(rdat), reserved),
                      rdat.reserved)) {
         PE_ERR(PEERR_READ);
         if (dirent == nullptr) {
@@ -937,8 +937,21 @@ bool getSections(bounded_buffer *b,
     std::uint32_t highOff = lowOff + curSec.SizeOfRawData;
     thisSec.sectionData = splitBuffer(fileBegin, lowOff, highOff);
 
+    // GH#109: we trusted [lowOff, highOff) to be a range that yields
+    // a valid bounded_buffer, despite these being user-controllable.
+    // splitBuffer correctly handles this, but we failed to check for
+    // the nullptr it returns as a sentinel.
+    if (thisSec.sectionData == nullptr) {
+      return false;
+    }
+
     secs.push_back(thisSec);
   }
+
+  std::sort(
+      secs.begin(), secs.end(), [](const section &lhs, const section &rhs) {
+        return lhs.sec.PointerToRawData < rhs.sec.PointerToRawData;
+      });
 
   return true;
 }
@@ -982,15 +995,15 @@ bool readOptionalHeader(bounded_buffer *b, optional_header_32 &header) {
 
   for (std::uint32_t i = 0; i < header.NumberOfRvaAndSizes; i++) {
     std::uint32_t c = (i * sizeof(data_directory));
-    c += _offset(optional_header_32, DataDirectory[0]);
+    c += offsetof(optional_header_32, DataDirectory[0]);
     std::uint32_t o;
 
-    o = c + _offset(data_directory, VirtualAddress);
+    o = c + offsetof(data_directory, VirtualAddress);
     if (!readDword(b, o, header.DataDirectory[i].VirtualAddress)) {
       return false;
     }
 
-    o = c + _offset(data_directory, Size);
+    o = c + offsetof(data_directory, Size);
     if (!readDword(b, o, header.DataDirectory[i].Size)) {
       return false;
     }
@@ -1037,15 +1050,15 @@ bool readOptionalHeader64(bounded_buffer *b, optional_header_64 &header) {
 
   for (std::uint32_t i = 0; i < header.NumberOfRvaAndSizes; i++) {
     std::uint32_t c = (i * sizeof(data_directory));
-    c += _offset(optional_header_64, DataDirectory[0]);
+    c += offsetof(optional_header_64, DataDirectory[0]);
     std::uint32_t o;
 
-    o = c + _offset(data_directory, VirtualAddress);
+    o = c + offsetof(data_directory, VirtualAddress);
     if (!readDword(b, o, header.DataDirectory[i].VirtualAddress)) {
       return false;
     }
 
-    o = c + _offset(data_directory, Size);
+    o = c + offsetof(data_directory, Size);
     if (!readDword(b, o, header.DataDirectory[i].Size)) {
       return false;
     }
@@ -1080,7 +1093,7 @@ bool readNtHeader(bounded_buffer *b, nt_header_32 &header) {
 
   header.Signature = pe_magic;
   bounded_buffer *fhb =
-      splitBuffer(b, _offset(nt_header_32, FileHeader), b->bufLen);
+      splitBuffer(b, offsetof(nt_header_32, FileHeader), b->bufLen);
 
   if (fhb == nullptr) {
     PE_ERR(PEERR_MEM);
@@ -1119,7 +1132,7 @@ bool readNtHeader(bounded_buffer *b, nt_header_32 &header) {
    * buffer regardless.
    */
   bounded_buffer *ohb =
-      splitBuffer(b, _offset(nt_header_32, OptionalHeader), b->bufLen);
+      splitBuffer(b, offsetof(nt_header_32, OptionalHeader), b->bufLen);
 
   if (ohb == nullptr) {
     deleteBuffer(fhb);
@@ -1166,7 +1179,17 @@ bool readNtHeader(bounded_buffer *b, nt_header_32 &header) {
 // zero extends its first argument to 32 bits and then performs a rotate left
 // operation equal to the second arguments value of the first argument’s bits
 static inline std::uint32_t rol(std::uint32_t val, std::uint32_t num) {
-  return ((val << num) & 0xffffffff) | (val >> (32 - num));
+  assert(num < 32);
+  // Disable MSVC warning for unary minus operator applied to unsigned type
+#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
+#pragma warning(push)
+#pragma warning(disable : 4146)
+#endif
+  // https://blog.regehr.org/archives/1063
+  return (val << num) | (val >> (-num & 31));
+#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
+#pragma warning(pop)
+#endif
 }
 
 std::uint32_t calculateRichChecksum(const bounded_buffer *b, pe_header &p) {
@@ -1182,7 +1205,7 @@ std::uint32_t calculateRichChecksum(const bounded_buffer *b, pe_header &p) {
     if (i >= 0x3C && i <= 0x3F) {
       continue;
     }
-    checksum += rol(b->buf[i], i);
+    checksum += rol(b->buf[i], i & 0x1F);
   }
 
   // Next, take summation of each Rich header entry by combining its ProductId
@@ -1467,7 +1490,7 @@ bool getExports(parsed_pe *p) {
     // get the name of this module
     std::uint32_t nameRva;
     if (!readDword(s.sectionData,
-                   rvaofft + _offset(export_dir_table, NameRVA),
+                   rvaofft + offsetof(export_dir_table, NameRVA),
                    nameRva)) {
       return false;
     }
@@ -1495,7 +1518,7 @@ bool getExports(parsed_pe *p) {
     // now, get all the named export symbols
     std::uint32_t numNames;
     if (!readDword(s.sectionData,
-                   rvaofft + _offset(export_dir_table, NumberOfNamePointers),
+                   rvaofft + offsetof(export_dir_table, NumberOfNamePointers),
                    numNames)) {
       return false;
     }
@@ -1504,7 +1527,7 @@ bool getExports(parsed_pe *p) {
       // get the names section
       std::uint32_t namesRVA;
       if (!readDword(s.sectionData,
-                     rvaofft + _offset(export_dir_table, NamePointerRVA),
+                     rvaofft + offsetof(export_dir_table, NamePointerRVA),
                      namesRVA)) {
         return false;
       }
@@ -1529,7 +1552,8 @@ bool getExports(parsed_pe *p) {
       // get the EAT section
       std::uint32_t eatRVA;
       if (!readDword(s.sectionData,
-                     rvaofft + _offset(export_dir_table, ExportAddressTableRVA),
+                     rvaofft +
+                         offsetof(export_dir_table, ExportAddressTableRVA),
                      eatRVA)) {
         return false;
       }
@@ -1553,7 +1577,7 @@ bool getExports(parsed_pe *p) {
       // get the ordinal base
       std::uint32_t ordinalBase;
       if (!readDword(s.sectionData,
-                     rvaofft + _offset(export_dir_table, OrdinalBase),
+                     rvaofft + offsetof(export_dir_table, OrdinalBase),
                      ordinalBase)) {
         return false;
       }
@@ -1561,7 +1585,7 @@ bool getExports(parsed_pe *p) {
       // get the ordinal table
       std::uint32_t ordinalTableRVA;
       if (!readDword(s.sectionData,
-                     rvaofft + _offset(export_dir_table, OrdinalTableRVA),
+                     rvaofft + offsetof(export_dir_table, OrdinalTableRVA),
                      ordinalTableRVA)) {
         return false;
       }
@@ -1704,13 +1728,13 @@ bool getRelocations(parsed_pe *p) {
       std::uint32_t blockSize;
 
       if (!readDword(d.sectionData,
-                     rvaofft + _offset(reloc_block, PageRVA),
+                     rvaofft + offsetof(reloc_block, PageRVA),
                      pageRva)) {
         return false;
       }
 
       if (!readDword(d.sectionData,
-                     rvaofft + _offset(reloc_block, BlockSize),
+                     rvaofft + offsetof(reloc_block, BlockSize),
                      blockSize)) {
         return false;
       }
@@ -2294,31 +2318,36 @@ bool getSymbolTable(parsed_pe *p) {
       }
 
     } else {
-//      std::ios::fmtflags originalStreamFlags(std::cerr.flags());
+#ifdef PEPARSE_LIBRARY_WARNINGS
+      std::ios::fmtflags originalStreamFlags(std::cerr.flags());
 
-//      auto storageClassName = GetSymbolTableStorageClassName(sym.storageClass);
-//      if (storageClassName == nullptr) {
-//        std::cerr << "Warning: Skipping auxiliary symbol of type 0x" << std::hex
-//                  << static_cast<std::uint32_t>(sym.storageClass)
-//                  << " at offset 0x" << std::hex << offset << "\n";
-//      } else {
-//        std::cerr << "Warning: Skipping auxiliary symbol of type "
-//                  << storageClassName << " at offset 0x" << std::hex << offset
-//                  << "\n";
-//      }
+      auto storageClassName = GetSymbolTableStorageClassName(sym.storageClass);
+      if (storageClassName == nullptr) {
+        std::cerr << "Warning: Skipping auxiliary symbol of type 0x" << std::hex
+                  << static_cast<std::uint32_t>(sym.storageClass)
+                  << " at offset 0x" << std::hex << offset << "\n";
+      } else {
 
-//      std::cerr.flags(originalStreamFlags);
+        std::cerr << "Warning: Skipping auxiliary symbol of type "
+                  << storageClassName << " at offset 0x" << std::hex << offset
+                  << "\n";
+      }
+
+      std::cerr.flags(originalStreamFlags);
+#endif
       offset = nextSymbolOffset;
     }
 
     if (offset != nextSymbolOffset) {
-//      std::ios::fmtflags originalStreamFlags(std::cerr.flags());
+#ifdef PEPARSE_LIBRARY_WARNINGS
+      std::ios::fmtflags originalStreamFlags(std::cerr.flags());
 
-//      std::cerr << "Warning: Invalid internal offset (current: 0x" << std::hex
-//                << offset << ", expected: 0x" << std::hex << nextSymbolOffset
-//                << ")\n";
+      std::cerr << "Warning: Invalid internal offset (current: 0x" << std::hex
+                << offset << ", expected: 0x" << std::hex << nextSymbolOffset
+                << ")\n";
 
-//      std::cerr.flags(originalStreamFlags);
+      std::cerr.flags(originalStreamFlags);
+#endif
       offset = nextSymbolOffset;
     }
   }
@@ -2326,7 +2355,7 @@ bool getSymbolTable(parsed_pe *p) {
   return true;
 }
 
-parsed_pe *ParsePEFromFile(const char *filePath) {
+parsed_pe *ParsePEFromBuffer(bounded_buffer *buffer) {
   // First, create a new parsed_pe structure
   // We pass std::nothrow parameter to new so in case of failure it returns
   // nullptr instead of throwing exception std::bad_alloc.
@@ -2338,13 +2367,7 @@ parsed_pe *ParsePEFromFile(const char *filePath) {
   }
 
   // Make a new buffer object to hold just our file data
-  p->fileBuffer = readFileToFileBuffer(filePath);
-
-  if (p->fileBuffer == nullptr) {
-    delete p;
-    // err is set by readFileToFileBuffer
-    return nullptr;
-  }
+  p->fileBuffer = buffer;
 
   p->internal = new (std::nothrow) parsed_pe_internal();
 
@@ -2420,6 +2443,28 @@ parsed_pe *ParsePEFromFile(const char *filePath) {
   return p;
 }
 
+parsed_pe *ParsePEFromFile(const char *filePath) {
+  auto buffer = readFileToFileBuffer(filePath);
+
+  if (buffer == nullptr) {
+    // err is set by readFileToFileBuffer
+    return nullptr;
+  }
+
+  return ParsePEFromBuffer(buffer);
+}
+
+parsed_pe *ParsePEFromPointer(std::uint8_t *ptr, std::uint32_t sz) {
+  auto buffer = makeBufferFromPointer(ptr, sz);
+
+  if (buffer == nullptr) {
+    // err is set by makeBufferFromPointer
+    return nullptr;
+  }
+
+  return ParsePEFromBuffer(buffer);
+}
+
 void DestructParsedPE(parsed_pe *p) {
   if (p == nullptr) {
     return;
@@ -2447,7 +2492,7 @@ void DestructParsedPE(parsed_pe *p) {
 void IterImpVAString(parsed_pe *pe, iterVAStr cb, void *cbd) {
   std::vector<importent> &l = pe->internal->imports;
 
-  for (importent i : l) {
+  for (importent &i : l) {
     if (cb(cbd, i.addr, i.moduleName, i.symbolName) != 0) {
       break;
     }
@@ -2460,7 +2505,7 @@ void IterImpVAString(parsed_pe *pe, iterVAStr cb, void *cbd) {
 void IterRelocs(parsed_pe *pe, iterReloc cb, void *cbd) {
   std::vector<reloc> &l = pe->internal->relocs;
 
-  for (reloc r : l) {
+  for (reloc &r : l) {
     if (cb(cbd, r.shiftedAddr, r.type) != 0) {
       break;
     }
@@ -2473,7 +2518,7 @@ void IterRelocs(parsed_pe *pe, iterReloc cb, void *cbd) {
 void IterSymbols(parsed_pe *pe, iterSymbol cb, void *cbd) {
   std::vector<symbol> &l = pe->internal->symbols;
 
-  for (symbol s : l) {
+  for (symbol &s : l) {
     if (cb(cbd,
            s.strName,
            s.value,
@@ -2492,7 +2537,7 @@ void IterSymbols(parsed_pe *pe, iterSymbol cb, void *cbd) {
 void IterExpVA(parsed_pe *pe, iterExp cb, void *cbd) {
   std::vector<exportent> &l = pe->internal->exports;
 
-  for (exportent i : l) {
+  for (exportent &i : l) {
     if (cb(cbd, i.addr, i.moduleName, i.symbolName) != 0) {
       break;
     }
@@ -2505,7 +2550,7 @@ void IterExpVA(parsed_pe *pe, iterExp cb, void *cbd) {
 void IterSec(parsed_pe *pe, iterSec cb, void *cbd) {
   parsed_pe_internal *pint = pe->internal;
 
-  for (section s : pint->secs) {
+  for (section &s : pint->secs) {
     if (cb(cbd, s.sectionBase, s.sectionName, s.sec, s.sectionData) != 0) {
       break;
     }
@@ -2647,20 +2692,38 @@ bool GetDataDirectoryEntry(parsed_pe *pe,
     return false;
   }
 
-  section sec;
-  if (!getSecForVA(pe->internal->secs, addr, sec)) {
-    PE_ERR(PEERR_SECTVA);
-    return false;
-  }
+  /* NOTE(ww): DIR_SECURITY is an annoying special case: its contents
+   * are never mapped into memory, so its "RVA" is actually a direct
+   * file offset.
+   * See:
+   * https://docs.microsoft.com/en-us/windows/win32/debug/pe-format#the-attribute-certificate-table-image-only
+   */
+  if (dirnum == DIR_SECURITY) {
+    auto *buf = splitBuffer(
+        pe->fileBuffer, dir.VirtualAddress, dir.VirtualAddress + dir.Size);
+    if (buf == nullptr) {
+      PE_ERR(PEERR_SIZE);
+      return false;
+    }
 
-  auto off = static_cast<std::uint32_t>(addr - sec.sectionBase);
-  if (off + dir.Size >= sec.sectionData->bufLen) {
-    PE_ERR(PEERR_SIZE);
-    return false;
-  }
+    raw_entry.assign(buf->buf, buf->buf + buf->bufLen);
+    deleteBuffer(buf);
+  } else {
+    section sec;
+    if (!getSecForVA(pe->internal->secs, addr, sec)) {
+      PE_ERR(PEERR_SECTVA);
+      return false;
+    }
 
-  raw_entry.assign(sec.sectionData->buf + off,
-                   sec.sectionData->buf + off + dir.Size);
+    auto off = static_cast<std::uint32_t>(addr - sec.sectionBase);
+    if (off + dir.Size >= sec.sectionData->bufLen) {
+      PE_ERR(PEERR_SIZE);
+      return false;
+    }
+
+    raw_entry.assign(sec.sectionData->buf + off,
+                     sec.sectionData->buf + off + dir.Size);
+  }
 
   return true;
 }

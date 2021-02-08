@@ -6,7 +6,7 @@
 #include <climits>
 #include <cstring>
 
-#include <parser-library/parse.h>
+#include <pe-parse/parse.h>
 
 using ParsedPeRef =
     std::unique_ptr<peparse::parsed_pe, void (*)(peparse::parsed_pe *)>;
@@ -243,7 +243,9 @@ bool convertAddress(ParsedPeRef &pe,
                             result);
     }
 
-    default: { return false; }
+    default: {
+      return false;
+    }
   }
 }
 

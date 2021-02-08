@@ -27,11 +27,16 @@ THE SOFTWARE.
 #include <iostream>
 #include <sstream>
 
-#include <parser-library/parse.h>
+#include <pe-parse/parse.h>
+
+#include "vendor/argh.h"
 
 using namespace peparse;
 
-int printExps(void *N, VA funcAddr, std::string &mod, std::string &func) {
+int printExps(void *N,
+              const VA &funcAddr,
+              const std::string &mod,
+              const std::string &func) {
   static_cast<void>(N);
 
   auto address = static_cast<std::uint32_t>(funcAddr);
@@ -47,7 +52,7 @@ int printExps(void *N, VA funcAddr, std::string &mod, std::string &func) {
 }
 
 int printImports(void *N,
-                 VA impAddr,
+                 const VA &impAddr,
                  const std::string &modName,
                  const std::string &symName) {
   static_cast<void>(N);
@@ -59,7 +64,7 @@ int printImports(void *N,
   return 0;
 }
 
-int printRelocs(void *N, VA relocAddr, reloc_type type) {
+int printRelocs(void *N, const VA &relocAddr, const reloc_type &type) {
   static_cast<void>(N);
 
   std::cout << "TYPE: ";
@@ -99,12 +104,12 @@ int printRelocs(void *N, VA relocAddr, reloc_type type) {
 }
 
 int printSymbols(void *N,
-                 std::string &strName,
-                 uint32_t &value,
-                 int16_t &sectionNumber,
-                 uint16_t &type,
-                 uint8_t &storageClass,
-                 uint8_t &numberOfAuxSymbols) {
+                 const std::string &strName,
+                 const uint32_t &value,
+                 const int16_t &sectionNumber,
+                 const uint16_t &type,
+                 const uint8_t &storageClass,
+                 const uint8_t &numberOfAuxSymbols) {
   static_cast<void>(N);
 
   std::cout << "Symbol Name: " << strName << "\n";
@@ -227,7 +232,7 @@ int printSymbols(void *N,
   return 0;
 }
 
-int printRich(void *N, rich_entry r) {
+int printRich(void *N, const rich_entry &r) {
   static_cast<void>(N);
   std::cout << std::dec;
   std::cout << std::setw(10) << "ProdId:" << std::setw(7) << r.ProductId;
@@ -239,7 +244,7 @@ int printRich(void *N, rich_entry r) {
   return 0;
 }
 
-int printRsrc(void *N, resource r) {
+int printRsrc(void *N, const resource &r) {
   static_cast<void>(N);
 
   if (r.type_str.length())
@@ -264,10 +269,10 @@ int printRsrc(void *N, resource r) {
 }
 
 int printSecs(void *N,
-              VA secBase,
-              std::string &secName,
-              image_section_header s,
-              bounded_buffer *data) {
+              const VA &secBase,
+              const std::string &secName,
+              const image_section_header &s,
+              const bounded_buffer *data) {
   static_cast<void>(N);
   static_cast<void>(s);
 
@@ -292,14 +297,21 @@ int printSecs(void *N,
   std::cout << std::boolalpha << static_cast<bool>(p->peHeader.x) << "\n";
 
 int main(int argc, char *argv[]) {
-  if (argc != 2 || (argc == 2 && std::strcmp(argv[1], "--help") == 0)) {
+
+  argh::parser cmdl(argv);
+
+  if (cmdl[{"-h", "--help"}] || argc <= 1) {
     std::cout << "dump-pe utility from Trail of Bits\n";
     std::cout << "Repository: https://github.com/trailofbits/pe-parse\n\n";
     std::cout << "Usage:\n\tdump-pe /path/to/executable.exe\n";
-    return 1;
+    return 0;
+  } else if (cmdl[{"-v", "--version"}]) {
+    std::cout << "dump-pe (pe-parse) version " << PEPARSE_VERSION << "\n";
+    return 0;
   }
 
-  parsed_pe *p = ParsePEFromFile(argv[1]);
+  parsed_pe *p = ParsePEFromFile(cmdl[1].c_str());
+
   if (p == nullptr) {
     std::cout << "Error: " << GetPEErr() << " (" << GetPEErrString() << ")"
               << "\n";

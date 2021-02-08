@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include <fstream>
 
 // keep this header above "windows.h" because it contains many types
-#include <parser-library/parse.h>
+#include <pe-parse/parse.h>
 
 #ifdef _WIN32
 
@@ -293,6 +293,28 @@ bounded_buffer *readFileToFileBuffer(const char *filePath) {
   p->bufLen = static_cast<std::uint32_t>(s.st_size);
 #endif
   p->copy = false;
+  p->swapBytes = false;
+
+  return p;
+}
+
+bounded_buffer *makeBufferFromPointer(std::uint8_t *data, std::uint32_t sz) {
+  if (data == nullptr) {
+    PE_ERR(PEERR_MEM);
+    return nullptr;
+  }
+
+  bounded_buffer *p = new (std::nothrow) bounded_buffer();
+
+  if (p == nullptr) {
+    PE_ERR(PEERR_MEM);
+    return nullptr;
+  }
+
+  p->copy = true;
+  p->detail = nullptr;
+  p->buf = data;
+  p->bufLen = sz;
   p->swapBytes = false;
 
   return p;
