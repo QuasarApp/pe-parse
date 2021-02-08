@@ -34,10 +34,13 @@ INCLUDEPATH += "$$PWD/include"
 
 
 HEADERS += \
-    include/parser-library/nt-headers.h \
-    include/parser-library/parse.h \
-    include/parser-library/to_string.h
+    include/pe-parse/nt-headers.h \
+    include/pe-parse/parse.h \
+    include/pe-parse/to_string.h
 
 SOURCES += \
     src/buffer.cpp \
-    src/parse.cpp
+    src/parse.cpp \
+
+unix:   SOURCES += src/unicode_codecvt.cpp
+win32:  SOURCES += src/unicode_winapi.cpp
