@@ -40,7 +40,10 @@ HEADERS += \
 
 SOURCES += \
     src/buffer.cpp \
-    src/parse.cpp \
+    src/parse.cpp
 
-unix:   SOURCES += src/unicode_codecvt.cpp
-win32:  SOURCES += src/unicode_winapi.cpp
+win32-msvc: {
+    SOURCES += src/unicode_winapi.cpp
+} else : {
+    SOURCES += src/unicode_codecvt.cpp
+}
